@@ -6,7 +6,7 @@
 
 /**
  * Init & Term - Function Pointer for UpfOps to do initialization and termination
- * 
+ *
  * @data: parameter used by self function pointer
  * @return: STATUS_OK or STATUS_ERROR if the functions exec fail
  */
@@ -15,18 +15,18 @@ typedef Status (*Term)(void *data);
 
 /**
  * UpfOps - Structure for UpfInit and UpfTerm
- * 
+ *
  * @name: used for print log
- * 
+ *
  * @init: NULL or function pointer that it will exec when UPF initialization
  * @initData: parameter for function "init"
- * 
+ *
  * @term: NULL or function pointer that it will exec when UPF termination
  * @termData: parameter for function "init"
  */
 typedef struct {
     char *name;
-    
+
     Init init;
     void *initData;
 
@@ -36,7 +36,7 @@ typedef struct {
 
 /**
  * UpfInit - Do the initialization for UPF by UpfOpsList in "upf_init.c"
- * 
+ *
  * @configPath: Path for set parameters when UPF init
  * @return: STATUS_OK or STATUS_ERROR if one part of init is failed
  */
@@ -44,7 +44,7 @@ Status UpfInit();
 
 /**
  * UpfTerm - Do the termination for UPF by UpfOpsList in "upf_init.c"
- * 
+ *
  * @return: STATUS_OK or STATUS_ERROR if one part of init is failed
  */
 Status UpfTerm();
@@ -54,5 +54,17 @@ Status UpfTerm();
  */
 
 Status UpfSetConfigPath(char *path);
+
+/**
+ * UpfSetNfLogPath - Set NF log path for init
+ */
+
+Status UpfSetNfLogPath(char *path);
+
+/**
+ * UpfSetLogPath - Set Free5gc log path for init
+ */
+
+Status UpfSetFree5gcLogPath(char *path);
 
 #endif /* __UPF_INIT_H__ */

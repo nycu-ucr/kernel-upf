@@ -245,16 +245,20 @@ Status SockSendTo(Sock *sock, void *buffer, int size) {
     const char *ptr = buffer;
 
     do {
-        status = sendto(sock->fd, ptr, remain, sock->wflag, (struct sockaddr *) &sock->remoteAddr, addrLen);
-        UTLT_Assert(status >= 0, return STATUS_ERROR, "Socket SendTo Error : %s", strerror(errno));
+        status = sendto(sock->fd, ptr, remain, sock->wflag, 
+            (struct sockaddr *) &sock->remoteAddr, addrLen);
+    
+        UTLT_Assert(status >= 0, return STATUS_ERROR, 
+            "Socket SendTo Error : %s,%s", strerror(errno),GetIP(&sock->remoteAddr));
         ptr += status;
         remain -= status;
     } while(status && remain);
 
     if (remain) {
-        UTLT_Warning("Socket %d need to sendto %d byte, but now only sendto %d byte", sock->fd, size, size - remain);
+        UTLT_Warning("SockSendTo: fd: %d need to sendto %d byte, but now only sendto %d byte", 
+            sock->fd, size, size - remain);
     } else {
-//        UTLT_Trace("Socket %d has been sendto %d byte", sock->fd, size);
+        //UTLT_Trace("Socket %d has been sendto %d byte", sock->fd, size);
     }
 
     return STATUS_OK;

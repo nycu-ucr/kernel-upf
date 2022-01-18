@@ -18,16 +18,21 @@ Status UpfN4HandleUpdateQer(UpfSession *session, UpdateQER *updateQer);
 Status UpfN4HandleRemovePdr(UpfSession *session, uint16_t nPDRID);
 Status UpfN4HandleRemoveFar(UpfSession *session, uint32_t nFARID);
 Status UpfN4HandleRemoveQer(UpfSession *session, uint32_t nQERID);
-void UpfN4HandleSessionEstablishmentRequest(
-        UpfSession *session, PfcpXact *pfcpXact, PFCPSessionEstablishmentRequest *request);
-void UpfN4HandleSessionModificationRequest(
-        UpfSession *session, PfcpXact *xact, PFCPSessionModificationRequest *request);
-void UpfN4HandleSessionDeletionRequest(UpfSession *session, PfcpXact *xact, PFCPSessionDeletionRequest *request);
-void UpfN4HandleSessionReportResponse(
-        UpfSession *session, PfcpXact *xact, PFCPSessionReportResponse *response);
-void UpfN4HandleAssociationSetupRequest(PfcpXact *xact, PFCPAssociationSetupRequest *request);
-void UpfN4HandleAssociationUpdateRequest(PfcpXact *xact, PFCPAssociationUpdateRequest *request);
-void UpfN4HandleAssociationReleaseRequest(PfcpXact *xact, PFCPAssociationReleaseRequest *request);
+void UpfN4HandleSessionEstablishmentRequest(UpfSession *session, 
+    PfcpXact *pfcpXact, PfcpHeader *reqHdr, 
+    PFCPSessionEstablishmentRequest *request);
+void UpfN4HandleSessionModificationRequest(UpfSession *session, 
+    PfcpXact *xact, PFCPSessionModificationRequest *request);
+void UpfN4HandleSessionDeletionRequest(UpfSession *session, 
+    PfcpXact *xact, PFCPSessionDeletionRequest *request);
+void UpfN4HandleSessionReportResponse(UpfSession *session,
+    PfcpXact *xact, uint32_t seqId, PFCPSessionReportResponse *response);
+void UpfN4HandleAssociationSetupRequest(PfcpXact *xact, 
+    PFCPAssociationSetupRequest *request);
+void UpfN4HandleAssociationUpdateRequest(PfcpXact *xact, 
+    PFCPAssociationUpdateRequest *request);
+void UpfN4HandleAssociationReleaseRequest(PfcpXact *xact, 
+    PFCPAssociationReleaseRequest *request);
 void UpfN4HandleHeartbeatRequest(PfcpXact *xact, HeartbeatRequest *request);
 void UpfN4HandleHeartbeatResponse(PfcpXact *xact, HeartbeatResponse *response);
 

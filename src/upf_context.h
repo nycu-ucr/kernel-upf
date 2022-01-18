@@ -30,6 +30,8 @@
 extern "C" {
 #endif /* __cplusplus */
 
+#define MAX_NUM_PACKET 500
+
 typedef struct _UpfUeIp      UpfUeIp;
 typedef struct _UpfDev       UpfDev;
 typedef struct gtp5g_pdr     UpfPdr;
@@ -70,6 +72,8 @@ typedef struct {
     uint16_t        pfcpPort;            // Default : PFCP_PORT
     ListHead        pfcpIPList;          // PFCP IPv4 Server List (SockNode)
     ListHead        pfcpIPv6List;        // PFCP IPv6 Server List (SockNode)
+    char            pfcpNodeIdAddr[256]; // PFCP Node ID Address (FQDN / IP)
+    PfcpNodeId      pfcpNodeId;          // PFCP Node ID
     Sock            *pfcpSock;           // IPv4 Socket
     Sock            *pfcpSock6;          // IPv6 Socket
     SockAddr        *pfcpAddr;           // IPv4 Address
@@ -105,7 +109,9 @@ typedef struct {
     EvtQId          eventQ;             // Event queue communicate between UP and CP
     ThreadID        pktRecvThread;      // Receive packet thread
 
-    // Session : hash(IMSI+DNN)
+#define UPF_SEID_START  (1)
+    uint64_t        nextSeid;           // unique to UPF, ++ on session create
+    // Session : hash(IPv4 + SEID)
     Hash            *sessionHash;
     // Save buffer packet here
     Hash            *bufPacketHash;
@@ -130,38 +136,93 @@ typedef struct _UpfUeIp {
     };
 } UpfUeIp;
 
+typedef struct _SessionReqState {
+    uint16_t        state;
+#define SMF_UPF_SESSION_STATE_INIT      0x0000
+#define SMF_UPF_SESSION_STATE_HANDLE    0x0001
+#define SMF_UPF_SESSION_STATE_SEND_RSP  0x0002
+#define SMF_UPF_SESSION_STATE_DELETED   0x0004
+#define SMF_UPF_SESSION_STATE_RELEASE   0x0008
+#define SMF_UPF_SESSION_STATE_ERROR     0xFFFF
+
+    uint16_t        subState;
+#define SMF_UPF_SESSION_SUB_STATE_INIT                  0x0000
+#define SMF_UPF_SESSION_SUB_STATE_HANDLE_SUCCESS        0x1000
+#define SMF_UPF_SESSION_SUB_STATE_HANDLE_FAILURE        0x1001
+#define SMF_UPF_SESSION_SUB_STATE_HANDLE_RESCHEDULE     0x1002
+#define SMF_UPF_SESSION_SUB_STATE_SEND_RSP_SUCCESS      0x2000
+#define SMF_UPF_SESSION_SUB_STATE_SEND_RSP_FAILURE      0x2001
+#define SMF_UPF_SESSION_SUB_STATE_SEND_RSP_RESCHDULE    0x2002
+#define SMF_UPF_SESSION_SUB_STATE_DELETED_SUCCESS       0x4000
+#define SMF_UPF_SESSION_SUB_STATE_DELETED_FAILURE       0x4001
+#define SMF_UPF_SESSION_SUB_STATE_DELETED_RESCHDULE     0x4002
+
+    uint32_t        sqn;
+} SessionReqState;
+
+
+#define PFCP_MAX_REQ_STATE                          3
+#define ConvertReqTypeToStateIndex(type, index)     \
+    do {                                            \
+        ((index) = (((type) - 50) / 2));              \
+    } while(0)
+
 typedef struct _UpfSession {
     int             index;
 
-    uint64_t        upfSeid;
+    SessionReqState reqState[PFCP_MAX_REQ_STATE];
+
+    // F-SEID 
     uint64_t        smfSeid;
+    PfcpFSeid       smfFseid;
 
-    /* DNN Config */
-    Pdn             pdn;
-    UpfUeIp         ueIpv4;
-    UpfUeIp         ueIpv6;
-
-    /* User location */
-    Tai             tai;
-    //ECgi          eCgi; // For LTE E-UTRA Cell ID
-    //NCgi          nCgi; // For 5GC NR Cell ID
-
-    /* Hashed key: hash(IMSI+DNN) */
-    uint8_t         hashKey[MAX_IMSI_LEN+MAX_DNN_LEN];
+    uint64_t        upfSeid;
+   
+    /* Hashed key: hash(IPV4(4) + SEID(8)) 
+    * TODO: IPv6 */
+#define UPF_SESS_HASHKEY_SZ (16)
+#define UPF_SESS_HASHKEY_SZ_HALF (8)
+    uint8_t         hashKey[UPF_SESS_HASHKEY_SZ];
     int             hashKeylen;
+    uint8_t         hashKeyR[UPF_SESS_HASHKEY_SZ]; /* hashkey with remote data  */
+    int             hashKeylenR;                   /* hashkeylen of remote data */
 
-    /* GTP, PFCP context */
-    //SockNode        *gtpNode;
     PfcpNode        *pfcpNode;
-    ListHead        pdrIdList;
 
+    ListHead        pdrIdList;
     ListHead        pdrList;
     ListHead        farList;
     ListHead        qerList;
     ListHead        barList;
     ListHead        urrList;
 
+    /* PFCP Session Report Request(SRR) Outstanding list */
+    ListHead        srrList;
 } UpfSession;
+
+typedef struct _UpfSRRNode {
+    ListHead    node;
+
+    UpfSession  *sess;
+    uint16_t    pdrId;
+    uint64_t    seid;
+
+    uint8_t     state;
+#define SRR_STATE_INIT      0x00
+#define SRR_STATE_SENT      0x01
+#define SRR_STATE_RECV      0x02
+#define SRR_STATE_TIMER     0x04
+#define SRR_STATE_TIMEOUT   0x08
+#define SRR_STATE_RELEASE   0xFF
+
+    uint16_t    seqCount;
+#define SRR_MAX_SEQ_COUNT   0x20
+    uint32_t    seqId[SRR_MAX_SEQ_COUNT];
+
+    uint8_t     timerCount;
+#define SRR_MAX_TIMEOUT_COUNT 0x03
+    timer_t     timer;
+} UpfSRRNode;
 
 // Used for buffering, Index type for each PDR
 typedef struct _UpfBufPacket {
@@ -172,7 +233,8 @@ typedef struct _UpfBufPacket {
     // TS 29.244 5.2.1 shows that PDR won't cross session
     const UpfSession *sessionPtr;
     uint16_t        pdrId;
-    Bufblk          *packetBuffer;
+    Bufblk          *packetBuffer[MAX_NUM_PACKET];
+    unsigned int used_buffer_length;
 } UpfBufPakcet;
 
 typedef struct {
@@ -277,14 +339,18 @@ Status UpfBufPacketRemoveAll();
 HashIndex *UpfSessionFirst();
 HashIndex *UpfSessionNext(HashIndex *hashIdx);
 UpfSession *UpfSessionThis(HashIndex *hashIdx);
-void SessionHashKeygen(uint8_t *out, int *outLen, uint8_t *imsi, int imsiLen, uint8_t *dnn);
-UpfSession *UpfSessionAdd(PfcpUeIpAddr *ueIp, uint8_t *dnn, uint8_t pdnType);
+UpfSession *UpfSessionAdd(PfcpFSeid *fseid);
 Status UpfSessionRemove(UpfSession *session);
 Status UpfSessionRemoveAll();
-UpfSession *UpfSessionFind(uint32_t idx);
 UpfSession *UpfSessionFindBySeid(uint64_t seid);
 UpfSession *UpfSessionAddByMessage(PfcpMessage *message);
 UpfSession *UpfSessionFindByPdrTeid(uint32_t teid);
+
+UpfSRRNode * UpfSrrFindByPdrId(UpfSession *sess, uint16_t pdrId);
+UpfSRRNode * UpfSrrFindBySeqId(UpfSession *sess, uint32_t seqId);
+void UpfSrrRemoveAllNode(UpfSession *sess);
+void UpfSrrAddNode(UpfSession *sess, UpfSRRNode *node);
+void UpfSrrRemoveNode(UpfSRRNode *node);
 
 #ifdef __cplusplus
 }

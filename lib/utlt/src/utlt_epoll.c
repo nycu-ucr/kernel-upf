@@ -60,11 +60,18 @@ Status EpollDeregisterEvent(int epfd, Sock *sock) {
     return STATUS_OK;
 }
 
+/* Function Name: EpollWait
+ * Arguments:
+ *  @epfd: List of fd of sockets
+ *  @epEvent: List of events 
+ *  @timeout: Polling wait time in milliseconds
+ * Returns:
+ *  
+ */
 int EpollWait(int epfd, struct epoll_event *epEvent, int timeout) {
     if (timeout < 0) { 
         timeout = -1;
     }
-
     int nfds = epoll_wait(epfd, epEvent, MAX_NUM_OF_EVENT, timeout);
     UTLT_Assert(nfds >= 0, return -1, 
                 "Epoll Wait Error : %s", strerror(errno));

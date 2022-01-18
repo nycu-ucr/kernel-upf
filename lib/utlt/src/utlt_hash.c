@@ -3,9 +3,9 @@
 #include <string.h>
 #include <stdint.h>
 
-#define InitialMax 15 /* tunable == 2^n - 1 */
+#define InitialMax  1023 /* tunable == 2^n - 1 */
 
-void *AllocArray(Hash *ht, int max) {
+void * AllocArray(Hash *ht, int max) {
     uint32_t size = sizeof(*ht->array) * (max + 1);
     void *ptr = UTLT_Calloc(1, size);
     memset(ptr, 0, size);
@@ -14,7 +14,7 @@ void *AllocArray(Hash *ht, int max) {
 
 #define Free(__buf) UTLT_Free(__buf)
 
-Hash *HashMake() {
+Hash * HashMake() {
     Hash *ht;
     utime_t now = TimeNow();
 
@@ -23,15 +23,14 @@ Hash *HashMake() {
     ht->entry = NULL;
     ht->count = 0;
     ht->max = InitialMax;
-    ht->seed = (unsigned int)((now >> 32) ^ now ^
-                              (uintptr_t)ht ^ (uintptr_t)&now) - 1;
+    ht->seed = (unsigned int)((now >> 32) ^ now ^ ((uintptr_t) ht) ^ (uintptr_t) &now) - 1;
     ht->array = AllocArray(ht, ht->max);
     ht->hashFunc = NULL;
 
     return ht;
 }
 
-Hash *HashMakeCustom(HashFunc hashFunc) {
+Hash * HashMakeCustom(HashFunc hashFunc) {
     Hash *ht = HashMake();
     ht->hashFunc = hashFunc;
     return ht;
@@ -40,8 +39,8 @@ Hash *HashMakeCustom(HashFunc hashFunc) {
 void HashDestroy(Hash *ht) {
     HashEntry *he = NULL, *next_he = NULL;
 
-    UTLT_Assert(ht, return, "Null param");
-    UTLT_Assert(ht->array, return, "Null param");
+    UTLT_Assert(ht, return, "HashDestroy: Hash Table is NULL");
+    UTLT_Assert(ht->array, return, "HashDestroy: Hash table's array Null param");
 
     HashClear(ht);
 
@@ -58,7 +57,7 @@ void HashDestroy(Hash *ht) {
 }
 
 // Hash iteration functions.
-HashIndex *HashNext(HashIndex *hi) {
+HashIndex * HashNext(HashIndex *hi) {
     hi->this = hi->next;
     while (!hi->this) {
         if (hi->index > hi->ht->max)
@@ -70,7 +69,7 @@ HashIndex *HashNext(HashIndex *hi) {
     return hi;
 }
 
-HashIndex *HashFirst(Hash *ht) {
+HashIndex * HashFirst(Hash *ht) {
     HashIndex *hi;
 
     hi = &ht->iterator;
@@ -88,7 +87,7 @@ void HashThis(HashIndex *hi, const void **key, int *klen, void **val) {
     if (val)  *val  = (void *)hi->this->val;
 }
 
-const void *HashThisKey(HashIndex *hi) {
+const void * HashThisKey(HashIndex *hi) {
     const void *key;
 
     HashThis(hi, &key, NULL, NULL);
@@ -102,7 +101,7 @@ int HashThisKeyLen(HashIndex *hi) {
     return klen;
 }
 
-void *HashThisVal(HashIndex *hi) {
+void * HashThisVal(HashIndex *hi) {
     void *val;
 
     HashThis(hi, NULL, NULL, &val);
@@ -137,8 +136,7 @@ static unsigned int HashfuncDefault(const char *char_key, int *klen, unsigned in
             hash = hash * 33 + *p;
         }
         *klen = p - key;
-    }
-    else {
+    } else {
         for (p = key, i = *klen; i; i--, p++) {
             hash = hash * 33 + *p;
         }
@@ -160,7 +158,7 @@ unsigned int CoreHashfuncDefault(const char *char_key, int *klen) {
  * that hash entries can be removed.
  */
 
-static HashEntry **FindEntry(Hash *ht, const void *key, int klen, const void *val) {
+static HashEntry ** FindEntry(Hash *ht, const void *key, int klen, const void *val) {
     HashEntry **hep, *he;
     unsigned int hash;
 
@@ -171,10 +169,11 @@ static HashEntry **FindEntry(Hash *ht, const void *key, int klen, const void *va
 
     /* scan linked list */
     for (hep = &ht->array[hash & ht->max], he = *hep;
-         he; hep = &he->next, he = *hep) {
-        if (he->hash == hash
-            && he->klen == klen
-            && memcmp(he->key, key, klen) == 0)
+         he; 
+         hep = &he->next, he = *hep) {
+        if (he->hash == hash &&
+            he->klen == klen &&
+            memcmp(he->key, key, klen) == 0)
             break;
     }
     if (he || !val)
@@ -196,11 +195,11 @@ static HashEntry **FindEntry(Hash *ht, const void *key, int klen, const void *va
     return hep;
 }
 
-void *HashGet(Hash *ht, const void *key, int klen) {
+void * HashGet(Hash *ht, const void *key, int klen) {
     HashEntry *he;
     he = *FindEntry(ht, key, klen, NULL);
     if (he)
-        return (void *)he->val;
+        return (void *) he->val;
     else
         return NULL;
 }
@@ -217,8 +216,7 @@ void HashSet(Hash *ht, const void *key, int klen, const void *val) {
             //ht->entry = old;
             Free(old);
             --ht->count;
-        }
-        else {
+        } else {
             /* replace entry */
             (*hep)->val = val;
             /* check that the collision rate isn't too high */
@@ -230,7 +228,7 @@ void HashSet(Hash *ht, const void *key, int klen, const void *val) {
     /* else key not present and val==NULL */
 }
 
-void *HashGetOrSet(Hash *ht, const void *key, int klen, const void *val) {
+void * HashGetOrSet(Hash *ht, const void *key, int klen, const void *val) {
     HashEntry **hep;
     hep = FindEntry(ht, key, klen, val);
     if (*hep) {

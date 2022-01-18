@@ -7,6 +7,7 @@ project(free5GC_UPF C)
 # UPDK_PKTPROC_MODULE: packet processing module used by UPDK
 #  - either: "kernel" | ...
 set(UPDK_PKTPROC_MODULE "kernel")
+#set(CMAKE_USE_RELATIVE_PATHS True)
 
 # Build destination
 set(BUILD_BIN_DIR "${CMAKE_BINARY_DIR}/bin")

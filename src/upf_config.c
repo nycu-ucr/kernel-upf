@@ -12,6 +12,7 @@ static void DeleteYamlDocument();
 
 static Status AddGtpv1Endpoint(const char *host); // host: hostname or ip address
 static Status AddPfcpEndpoint(const char *host); // host: hostname or ip address
+static Status SetPfcpNodeIdAddr(const char *addr); // addr: fqdn or ip address
 static Status AddGtpv1EndpointWithName(const char *host, const char *ifname);
 
 static yaml_document_t *document = NULL;
@@ -144,7 +145,7 @@ Status UpfConfigParse() {
                     do {
                         // int i, hostCount = 0;
                         // const char *hostname[MAX_NUM_OF_HOSTNAME];
-                        const char *host;
+                        const char *host = NULL;
 
                         if (SetProtocolIter(&pfcpList, &pfcpIter))
                             break;
@@ -166,7 +167,13 @@ Status UpfConfigParse() {
                             AddPfcpEndpoint(host);
 
                     } while (YamlIterType(&pfcpList) == YAML_SEQUENCE_NODE);
+                } else if (!strcmp(upfKey, "node_id")) {
+                        const char *nodeIdAddr = YamlIterGet(&upfIter, GET_VALUE);
 
+                        UTLT_Assert(nodeIdAddr, return STATUS_ERROR, "Bad node_id");
+                        UTLT_Debug("nodeIdAddr=\"%s\"", nodeIdAddr);
+
+                        SetPfcpNodeIdAddr(nodeIdAddr);
                 } else if (!strcmp(upfKey, "dnn_list")) {
                     YamlIter dnnList, dnnIter;
                     YamlIterChild(&upfIter, &dnnList);
@@ -317,6 +324,20 @@ static Status AddPfcpEndpoint(const char *host) {
 
     SockNode *node = SockNodeListAdd(&Self()->pfcpIPList, ip);
     UTLT_Assert(node, return STATUS_ERROR, "");
+
+    return STATUS_OK;
+}
+
+static Status SetPfcpNodeIdAddr(const char *addr) {
+    UTLT_Assert(addr, return STATUS_ERROR, "");
+
+    int result;
+    char ip[INET6_ADDRSTRLEN];
+
+    result = GetAddrFromHost(ip, addr, INET6_ADDRSTRLEN);
+    UTLT_Assert(result == STATUS_OK, return STATUS_ERROR, "");
+
+    strncpy(Self()->pfcpNodeIdAddr, addr, sizeof(Self()->pfcpNodeIdAddr));
 
     return STATUS_OK;
 }

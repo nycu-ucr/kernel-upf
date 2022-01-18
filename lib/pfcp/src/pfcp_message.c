@@ -2,6 +2,7 @@
 
 #include <endian.h>
 #include <string.h>
+#include <stdio.h>
 #include <netinet/in.h>
 
 #include "utlt_debug.h"
@@ -9,6 +10,7 @@
 
 #include "pfcp_message.h"
 
+// "MsgType", "MsgLen", "isTlvObj", "numToParse", "next"
 static IeDescription ieDescriptionTable[] = {\
 {0, sizeof(Reserved), 1, 0, {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}}, \
 {1, sizeof(CreatePDR), 0, 11, {56, 29, 2, 95, 108, 81, 109, 109, 109, 109, 106, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}}, \
@@ -189,49 +191,96 @@ static IeDescription ieDescriptionTable[] = {\
 {0, sizeof(PFCPSessionReportResponse), 0, 4, {19, 40, 12, 50, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}}, \
 };
 
-_Bool dbf = 0;
+#ifdef PFCP_LIB_TLV_TRACE
+_Bool dbf = 1;
 
-int _TlvParseMessage(void * msg, IeDescription * msgDes, void * buff, int buffLen) {
+void dumpBuffer(uint8_t *buf, int len) {
+    char str[256];
+    sprintf(str, "%#x %#x %#x %#x %#x %#x %#x %#x "
+        "%#x %#x %#x %#x %#x", 
+        buf[0], buf[1], buf[2], buf[3], 
+        buf[4], buf[5], buf[6], buf[7],
+        buf[8], buf[9], buf[10], buf[11],
+        buf[12]);
+    UTLT_Info("Len: %d Buffer: %s", len, str);
+}
+#endif
+
+int _TlvParseMessage(void *msg, IeDescription *msgDes, void *buff, int buffLen) {
     int msgPivot = 0; // msg (struct) offset
     //void *root = buff;
     int buffOffset = 0; // buff offset
     int idx;
+
     for (idx = 0; idx < msgDes->numToParse; ++idx) {
-        if (dbf) { if (ieDescriptionTable[msgDes->next[idx]].msgType == 57) {
-                UTLT_Warning("Get F-SEID");
-            } }
+#ifdef PFCP_LIB_TLV_TRACE
+        if (dbf) { 
+            if (ieDescriptionTable[msgDes->next[idx]].msgType == 57) {
+                UTLT_Info("Get F-SEID");
+            } 
+        }
+#endif
         IeDescription *ieDes = &ieDescriptionTable[msgDes->next[idx]];
         uint16_t type;
         uint16_t length;
+
         memcpy(&type, buff + buffOffset, sizeof(uint16_t));
         memcpy(&length, buff + buffOffset + sizeof(uint16_t), sizeof(uint16_t));
+
         type = ntohs(type);
         length = ntohs(length);
-        if (dbf) { UTLT_Info("type: %d, len: %d", type, length); }
+#ifdef PFCP_LIB_TLV_TRACE
+        if (dbf && type == 57) { 
+            UTLT_Info("IEType: %d IELen: %d", type, length);
+        }
+#endif
         if (type != ieDes->msgType) {
-            if (dbf) { UTLT_Warning("%d not present, type: %d", ieDes->msgType, type); }
+#ifdef PFCP_LIB_TLV_TRACE
+            if (dbf) { 
+                UTLT_Warning("MsgType: %d not present Type: %d", ieDes->msgType, type); 
+            }
+#endif
             // not present
-            (*(unsigned long*)(msg + msgPivot)) = 0; // presence
+            (* (unsigned long *)(msg + msgPivot)) = 0; // presence
             msgPivot += ieDes->msgLen;
             continue;
         }
 
         if (ieDes->isTlvObj) {
-            if (dbf) { UTLT_Info("is TLV: %p", msg+msgPivot); }
-            ((TlvOctet*)(msg+msgPivot))->presence = 1;
-            ((TlvOctet*)(msg+msgPivot))->type = type;
+#ifdef PFCP_LIB_TLV_TRACE
+            if (dbf) { 
+                UTLT_Info("is TLV: %p", msg + msgPivot); 
+            }
+#endif
+            ((TlvOctet *)(msg + msgPivot))->presence = 1;
+            ((TlvOctet *)(msg + msgPivot))->type = type;
             void *newBuf = UTLT_Malloc(length);
-            memcpy(newBuf, buff + buffOffset + 2*sizeof(uint16_t), length);
-            ((TlvOctet*)(msg+msgPivot))->len = length;
-            ((TlvOctet*)(msg+msgPivot))->value = newBuf;
-            buffOffset += sizeof(uint16_t)*2 + length;
+
+            // 2 * sizeof(uint16_t) -> Means IE Type and IE Length
+            memcpy(newBuf, buff + buffOffset + (2 * sizeof(uint16_t)), length);
+#ifdef PFCP_LIB_TLV_TRACE            
+            if (dbf && type == 57) { 
+                dumpBuffer((uint8_t *)newBuf, length);
+            }
+#endif
+
+            ((TlvOctet *)(msg + msgPivot))->len = length;
+            ((TlvOctet *)(msg + msgPivot))->value = newBuf;
+            buffOffset += sizeof(uint16_t) * 2 + length;
             msgPivot += sizeof(TlvOctet);
             continue;
         } else {
-            if (dbf) { UTLT_Info("not TLV, desTB mstype: %d", ieDes->msgType); }
+#ifdef PFCP_LIB_TLV_TRACE
+            if (dbf) { 
+                UTLT_Info("not TLV, desTB mstype: %d", ieDes->msgType); 
+            }
+#endif
             // recursive
-            *((unsigned long*)(msg+msgPivot)) = 1; // presence
-            _TlvParseMessage(msg+msgPivot+sizeof(unsigned long), ieDes, buff + buffOffset + sizeof(uint16_t)*2, buffLen - buffOffset);
+            *((unsigned long *)(msg + msgPivot)) = 1; // presence
+            _TlvParseMessage(msg + msgPivot + sizeof(unsigned long), 
+                ieDes, 
+                buff + buffOffset + sizeof(uint16_t) * 2, 
+                buffLen - buffOffset);
             //int size = _TlvParseMessage(msg+msgPivot, ieDes, buff + buffOffset, buffLen - buffOffset);
             buffOffset += length + sizeof(uint16_t)*2;
             msgPivot += ieDes->msgLen;
@@ -247,12 +296,12 @@ Status PfcpParseMessage(PfcpMessage *pfcpMessage, Bufblk *bufBlk) {
     void *body = NULL;
     uint16_t bodyLen = 0;
 
-    UTLT_Assert(pfcpMessage, return STATUS_ERROR, "Message error");
-    UTLT_Assert(bufBlk, return STATUS_ERROR, "buffer error");
-    UTLT_Assert(bufBlk->buf, return STATUS_ERROR, "buffer payload error");
+    UTLT_Assert(pfcpMessage, return STATUS_ERROR, "PfcpParseMsg: Message NULL");
+    UTLT_Assert(bufBlk, return STATUS_ERROR, "PfcpParseMsg: buffer NULL");
+    UTLT_Assert(bufBlk->buf, return STATUS_ERROR, "PfcpParseMsg: buffer payload NULL");
 
     header = bufBlk->buf;
-    UTLT_Assert(header, return STATUS_ERROR, "header hasn't get pointer");
+    UTLT_Assert(header, return STATUS_ERROR, "PfcpParseMsg: header hasn't get pointer");
 
     memset(pfcpMessage, 0, sizeof(PfcpMessage)); // clear pfcpMessage
 
@@ -280,96 +329,118 @@ Status PfcpParseMessage(PfcpMessage *pfcpMessage, Bufblk *bufBlk) {
     switch(pfcpMessage->header.type) {
         case PFCP_HEARTBEAT_REQUEST:
             pfcpMessage->heartbeatRequest.presence = 1;
-            _TlvParseMessage((unsigned long *)&pfcpMessage->heartbeatRequest + 1, &ieDescriptionTable[PFCP_HEARTBEAT_REQUEST + 155], body, bodyLen);
+            _TlvParseMessage((unsigned long *)&pfcpMessage->heartbeatRequest + 1,
+                &ieDescriptionTable[PFCP_HEARTBEAT_REQUEST + 155], body, bodyLen);
             break;
         case PFCP_HEARTBEAT_RESPONSE:
             pfcpMessage->heartbeatResponse.presence = 1;
-            _TlvParseMessage((unsigned long *)&pfcpMessage->heartbeatResponse + 1, &ieDescriptionTable[PFCP_HEARTBEAT_RESPONSE + 155], body, bodyLen);
+            _TlvParseMessage((unsigned long *)&pfcpMessage->heartbeatResponse + 1, 
+                &ieDescriptionTable[PFCP_HEARTBEAT_RESPONSE + 155], body, bodyLen);
             break;
         case PFCPPFD_MANAGEMENT_REQUEST:
             pfcpMessage->pFCPPFDManagementRequest.presence = 1;
-            _TlvParseMessage((unsigned long *)&pfcpMessage->pFCPPFDManagementRequest + 1, &ieDescriptionTable[PFCPPFD_MANAGEMENT_REQUEST + 155], body, bodyLen);
+            _TlvParseMessage((unsigned long *)&pfcpMessage->pFCPPFDManagementRequest + 1, 
+                &ieDescriptionTable[PFCPPFD_MANAGEMENT_REQUEST + 155], body, bodyLen);
             break;
         case PFCPPFD_MANAGEMENT_RESPONSE:
             pfcpMessage->pFCPPFDManagementResponse.presence = 1;
-            _TlvParseMessage((unsigned long *)&pfcpMessage->pFCPPFDManagementResponse + 1, &ieDescriptionTable[PFCPPFD_MANAGEMENT_RESPONSE + 155], body, bodyLen);
+            _TlvParseMessage((unsigned long *)&pfcpMessage->pFCPPFDManagementResponse + 1, 
+                &ieDescriptionTable[PFCPPFD_MANAGEMENT_RESPONSE + 155], body, bodyLen);
             break;
         case PFCP_ASSOCIATION_SETUP_REQUEST:
             pfcpMessage->pFCPAssociationSetupRequest.presence = 1;
-            _TlvParseMessage((unsigned long *)&pfcpMessage->pFCPAssociationSetupRequest + 1, &ieDescriptionTable[PFCP_ASSOCIATION_SETUP_REQUEST+155], body, bodyLen);
+            _TlvParseMessage((unsigned long *)&pfcpMessage->pFCPAssociationSetupRequest + 1, 
+                &ieDescriptionTable[PFCP_ASSOCIATION_SETUP_REQUEST+155], body, bodyLen);
             break;
         case PFCP_ASSOCIATION_SETUP_RESPONSE:
             pfcpMessage->pFCPAssociationSetupResponse.presence = 1;
-            _TlvParseMessage((unsigned long *)&pfcpMessage->pFCPAssociationSetupResponse + 1, &ieDescriptionTable[PFCP_ASSOCIATION_SETUP_RESPONSE+155], body, bodyLen);
+            _TlvParseMessage((unsigned long *)&pfcpMessage->pFCPAssociationSetupResponse + 1, 
+                &ieDescriptionTable[PFCP_ASSOCIATION_SETUP_RESPONSE+155], body, bodyLen);
             break;
         case PFCP_ASSOCIATION_UPDATE_REQUEST:
             pfcpMessage->pFCPAssociationUpdateRequest.presence = 1;
-            _TlvParseMessage((unsigned long *)&pfcpMessage->pFCPAssociationUpdateRequest + 1, &ieDescriptionTable[PFCP_ASSOCIATION_UPDATE_REQUEST+155], body, bodyLen);
+            _TlvParseMessage((unsigned long *)&pfcpMessage->pFCPAssociationUpdateRequest + 1, 
+                &ieDescriptionTable[PFCP_ASSOCIATION_UPDATE_REQUEST+155], body, bodyLen);
             break;
         case PFCP_ASSOCIATION_UPDATE_RESPONSE:
             pfcpMessage->pFCPAssociationUpdateResponse.presence = 1;
-            _TlvParseMessage((unsigned long *)&pfcpMessage->pFCPAssociationUpdateResponse + 1, &ieDescriptionTable[PFCP_ASSOCIATION_UPDATE_RESPONSE+155], body, bodyLen);
+            _TlvParseMessage((unsigned long *)&pfcpMessage->pFCPAssociationUpdateResponse + 1, 
+                &ieDescriptionTable[PFCP_ASSOCIATION_UPDATE_RESPONSE+155], body, bodyLen);
             break;
         case PFCP_ASSOCIATION_RELEASE_REQUEST:
             pfcpMessage->pFCPAssociationReleaseRequest.presence = 1;
-            _TlvParseMessage((unsigned long *)&pfcpMessage->pFCPAssociationReleaseRequest + 1, &ieDescriptionTable[PFCP_ASSOCIATION_RELEASE_REQUEST+155], body, bodyLen);
+            _TlvParseMessage((unsigned long *)&pfcpMessage->pFCPAssociationReleaseRequest + 1, 
+                &ieDescriptionTable[PFCP_ASSOCIATION_RELEASE_REQUEST+155], body, bodyLen);
             break;
         case PFCP_ASSOCIATION_RELEASE_RESPONSE:
             pfcpMessage->pFCPAssociationReleaseResponse.presence = 1;
-            _TlvParseMessage((unsigned long *)&pfcpMessage->pFCPAssociationReleaseResponse + 1, &ieDescriptionTable[PFCP_ASSOCIATION_RELEASE_RESPONSE+155], body, bodyLen);
+            _TlvParseMessage((unsigned long *)&pfcpMessage->pFCPAssociationReleaseResponse + 1, 
+                &ieDescriptionTable[PFCP_ASSOCIATION_RELEASE_RESPONSE+155], body, bodyLen);
             break;
         case PFCP_VERSION_NOT_SUPPORTED_RESPONSE:
             break;
         case PFCP_NODE_REPORT_REQUEST:
             pfcpMessage->pFCPNodeReportRequest.presence = 1;
-            _TlvParseMessage((unsigned long *)&pfcpMessage->pFCPNodeReportRequest + 1, &ieDescriptionTable[PFCP_NODE_REPORT_REQUEST + 155 - 1], body, bodyLen);
+            _TlvParseMessage((unsigned long *)&pfcpMessage->pFCPNodeReportRequest + 1, 
+                &ieDescriptionTable[PFCP_NODE_REPORT_REQUEST + 155 - 1], body, bodyLen);
             break;
         case PFCP_NODE_REPORT_RESPONSE:
             pfcpMessage->pFCPNodeReportResponse.presence = 1;
-            _TlvParseMessage((unsigned long *)&pfcpMessage->pFCPNodeReportResponse + 1, &ieDescriptionTable[PFCP_NODE_REPORT_RESPONSE + 155 - 1], body, bodyLen);
+            _TlvParseMessage((unsigned long *)&pfcpMessage->pFCPNodeReportResponse + 1, 
+                &ieDescriptionTable[PFCP_NODE_REPORT_RESPONSE + 155 - 1], body, bodyLen);
             break;
         case PFCP_SESSION_SET_DELETION_REQUEST:
             pfcpMessage->pFCPSessionSetDeletionRequest.presence = 1;
-            _TlvParseMessage((unsigned long *)&pfcpMessage->pFCPSessionSetDeletionRequest + 1, &ieDescriptionTable[PFCP_SESSION_SET_DELETION_REQUEST + 155 - 1], body, bodyLen);
+            _TlvParseMessage((unsigned long *)&pfcpMessage->pFCPSessionSetDeletionRequest + 1, 
+                &ieDescriptionTable[PFCP_SESSION_SET_DELETION_REQUEST + 155 - 1], body, bodyLen);
             break;
         case PFCP_SESSION_SET_DELETION_RESPONSE:
             pfcpMessage->pFCPSessionSetDeletionResponse.presence = 1;
-            _TlvParseMessage((unsigned long *)&pfcpMessage->pFCPSessionSetDeletionResponse + 1, &ieDescriptionTable[PFCP_SESSION_SET_DELETION_RESPONSE + 155 - 1], body, bodyLen);
+            _TlvParseMessage((unsigned long *)&pfcpMessage->pFCPSessionSetDeletionResponse + 1, 
+                &ieDescriptionTable[PFCP_SESSION_SET_DELETION_RESPONSE + 155 - 1], body, bodyLen);
             break;
         case PFCP_SESSION_ESTABLISHMENT_REQUEST:
             pfcpMessage->pFCPSessionEstablishmentRequest.presence = 1;
-            _TlvParseMessage((unsigned long *)&pfcpMessage->pFCPSessionEstablishmentRequest + 1, &ieDescriptionTable[PFCP_SESSION_ESTABLISHMENT_REQUEST + 155 - (50-15) - 1], body, bodyLen);
+            _TlvParseMessage((unsigned long *)&pfcpMessage->pFCPSessionEstablishmentRequest + 1, 
+                &ieDescriptionTable[PFCP_SESSION_ESTABLISHMENT_REQUEST + 155 - (50-15) - 1], body, bodyLen);
             break;
         case PFCP_SESSION_ESTABLISHMENT_RESPONSE:
             pfcpMessage->pFCPSessionEstablishmentResponse.presence = 1;
-            _TlvParseMessage((unsigned long *)&pfcpMessage->pFCPSessionEstablishmentResponse + 1, &ieDescriptionTable[PFCP_SESSION_ESTABLISHMENT_RESPONSE + 155 - (50-15) - 1], body, bodyLen);
+            _TlvParseMessage((unsigned long *)&pfcpMessage->pFCPSessionEstablishmentResponse + 1, 
+                &ieDescriptionTable[PFCP_SESSION_ESTABLISHMENT_RESPONSE + 155 - (50-15) - 1], body, bodyLen);
             break;
         case PFCP_SESSION_MODIFICATION_REQUEST:
             pfcpMessage->pFCPSessionModificationRequest.presence = 1;
-            _TlvParseMessage((unsigned long *)&pfcpMessage->pFCPSessionModificationRequest + 1, &ieDescriptionTable[PFCP_SESSION_MODIFICATION_REQUEST + 155 - (50-15) - 1], body, bodyLen);
+            _TlvParseMessage((unsigned long *)&pfcpMessage->pFCPSessionModificationRequest + 1, 
+                &ieDescriptionTable[PFCP_SESSION_MODIFICATION_REQUEST + 155 - (50-15) - 1], body, bodyLen);
             break;
         case PFCP_SESSION_MODIFICATION_RESPONSE:
             pfcpMessage->pFCPSessionModificationResponse.presence = 1;
-            _TlvParseMessage((unsigned long *)&pfcpMessage->pFCPSessionModificationResponse + 1, &ieDescriptionTable[PFCP_SESSION_MODIFICATION_RESPONSE + 155 - (50-15) - 1], body, bodyLen);
+            _TlvParseMessage((unsigned long *)&pfcpMessage->pFCPSessionModificationResponse + 1, 
+                &ieDescriptionTable[PFCP_SESSION_MODIFICATION_RESPONSE + 155 - (50 - 15) - 1], body, bodyLen);
             break;
         case PFCP_SESSION_DELETION_REQUEST:
             pfcpMessage->pFCPSessionDeletionRequest.presence = 1;
-            _TlvParseMessage((unsigned long *)&pfcpMessage->pFCPSessionDeletionRequest + 1, &ieDescriptionTable[PFCP_SESSION_DELETION_REQUEST + 155 - (50-15) - 1], body, bodyLen);
+            _TlvParseMessage((unsigned long *)&pfcpMessage->pFCPSessionDeletionRequest + 1, 
+                &ieDescriptionTable[PFCP_SESSION_DELETION_REQUEST + 155 - (50-15) - 1], body, bodyLen);
             break;
         case PFCP_SESSION_DELETION_RESPONSE:
             pfcpMessage->pFCPSessionDeletionResponse.presence = 1;
-            _TlvParseMessage((unsigned long *)&pfcpMessage->pFCPSessionDeletionResponse + 1, &ieDescriptionTable[PFCP_SESSION_DELETION_RESPONSE + 155 - (50-15) - 1], body, bodyLen);
+            _TlvParseMessage((unsigned long *)&pfcpMessage->pFCPSessionDeletionResponse + 1, 
+                &ieDescriptionTable[PFCP_SESSION_DELETION_RESPONSE + 155 - (50-15) - 1], body, bodyLen);
             break;
         case PFCP_SESSION_REPORT_REQUEST:
             pfcpMessage->pFCPSessionReportRequest.presence = 1;
-            _TlvParseMessage((unsigned long *)&pfcpMessage->pFCPSessionReportRequest + 1, &ieDescriptionTable[PFCP_SESSION_REPORT_REQUEST + 155 - (50-15) - 1], body, bodyLen);
+            _TlvParseMessage((unsigned long *)&pfcpMessage->pFCPSessionReportRequest + 1,
+                &ieDescriptionTable[PFCP_SESSION_REPORT_REQUEST + 155 - (50-15) - 1], body, bodyLen);
             break;
         case PFCP_SESSION_REPORT_RESPONSE:
             pfcpMessage->pFCPSessionReportResponse.presence = 1;
-            _TlvParseMessage((unsigned long *)&pfcpMessage->pFCPSessionReportResponse + 1, &ieDescriptionTable[PFCP_SESSION_REPORT_RESPONSE + 155 - (50-15) - 1], body, bodyLen);
+            _TlvParseMessage((unsigned long *)&pfcpMessage->pFCPSessionReportResponse + 1, 
+                &ieDescriptionTable[PFCP_SESSION_REPORT_RESPONSE + 155 - (50-15) - 1], body, bodyLen);
             break;
         default:
-            UTLT_Warning("Not implmented(type:%d)", &pfcpMessage->header.type);
+            UTLT_Warning("PfcpParseMsg: Not implmented type: %d", &pfcpMessage->header.type);
     }
 
     return status;
@@ -377,8 +448,9 @@ Status PfcpParseMessage(PfcpMessage *pfcpMessage, Bufblk *bufBlk) {
 
 int _TlvBuildMessage(Bufblk **bufBlkPtr, void *msg, IeDescription *ieDescription) {
     //UTLT_Warning("Addr : %p", msg);
-    UTLT_Assert(bufBlkPtr, return 0, "buffer error");
-    UTLT_Assert(msg, return 0, "message error");
+    UTLT_Assert(bufBlkPtr, return 0, "_TlvBuildMsg: buffer NULL");
+    UTLT_Assert(msg, return 0, "_TlvBuildMsg: message NULL");
+
     if (*(unsigned long *)msg == 0) {
         // present bit
         //UTLT_Warning("no ie");
@@ -386,12 +458,16 @@ int _TlvBuildMessage(Bufblk **bufBlkPtr, void *msg, IeDescription *ieDescription
     }
 
     if (ieDescription->isTlvObj) {
-      if (dbf) { UTLT_Info("TLV: type: %d, %d, len: %d, presence: %d",
-                           ieDescription->msgType, ((TlvOctet*)msg)->type, ((TlvOctet *)msg)->len, ((unsigned long*)msg)[0]); }
+#ifdef PFCP_LIB_TLV_TRACE
+      if (dbf) { 
+        UTLT_Info("_TlvBuildMsg: type: %d, %d, len: %d, presence: %d",
+            ieDescription->msgType, ((TlvOctet*)msg)->type, ((TlvOctet *)msg)->len,
+            ((unsigned long*)msg)[0]); 
+        }
+#endif
         //UTLT_Info("msgType: %d, msgLen: %d", ieDescription->msgType, ((TlvOctet *)msg)->len);
         int buffLen = sizeof(uint16_t) * 2 + ((TlvOctet *)msg)->len;
         *bufBlkPtr = BufblkAlloc(1, buffLen);
-        UTLT_Assert((*bufBlkPtr), return 0, "buffer block alloc error");
         uint16_t *tagPtr = (uint16_t *) ((*bufBlkPtr)->buf);
         uint16_t *lenPtr = &tagPtr[1];
 
@@ -400,41 +476,57 @@ int _TlvBuildMessage(Bufblk **bufBlkPtr, void *msg, IeDescription *ieDescription
         *lenPtr = htons(buffLen - sizeof(uint16_t) * 2);
         memcpy((void *) &tagPtr[2], ((TlvOctet *)msg)->value, ((TlvOctet *)msg)->len);
     } else {
-      if (dbf) { UTLT_Info("not TLV"); }
+#ifdef PFCP_LIB_TLV_TRACE
+        if (dbf) { 
+            UTLT_Info("_TlvBuildMsg: not TLV"); 
+        }
+#endif
         size_t idx;
         int msgPivot = 0;
         *bufBlkPtr = BufblkAlloc(1, sizeof(uint16_t) * 2);
-        UTLT_Assert((*bufBlkPtr), return 0, "buffer block alloc error");
         uint16_t *tagPtr = (*bufBlkPtr)->buf;
         uint16_t *lenPtr = &tagPtr[1];
         (*bufBlkPtr)->len = sizeof(uint16_t) * 2;
 
         *tagPtr = htons(ieDescription->msgType);
-        if (dbf) { UTLT_Warning("Check addr: tag: %p, buf: %p", tagPtr, (*bufBlkPtr)->buf); }
-        if (dbf) { UTLT_Info("msgType: %u, tagPtr value: %u, first type: %u", ieDescription->msgType, ((uint16_t*)tagPtr)[0],ntohs(((uint16_t*)(*bufBlkPtr)->buf)[0])); }
+#ifdef PFCP_LIB_TLV_TRACE
+        if (dbf) { 
+            UTLT_Warning("_TlvBuildMsg: Check addr: tag: %p buf: %p", tagPtr, (*bufBlkPtr)->buf); 
+            UTLT_Info("_TlvBuildMsg: msgType: %u tagPtr value: %u first type: %u", 
+                ieDescription->msgType, ((uint16_t*)tagPtr)[0], 
+                ntohs(((uint16_t*)(*bufBlkPtr)->buf)[0]));
+        }
+#endif
         *lenPtr = htons(0);
 
         int bufOffset = 0;
-        void *msgNoPresentPtr = &((unsigned long*)msg)[1];
+        void *msgNoPresentPtr = &((unsigned long *) msg)[1];
         for (idx = 0; idx < ieDescription->numToParse; ++idx) {
             Bufblk *tmpBufBlkPtr = NULL;
-            bufOffset += _TlvBuildMessage(&tmpBufBlkPtr, &((uint8_t *)msgNoPresentPtr)[msgPivot], &ieDescriptionTable[ieDescription->next[idx]]);
+            bufOffset += _TlvBuildMessage(&tmpBufBlkPtr, 
+                &((uint8_t *)msgNoPresentPtr)[msgPivot], 
+                &ieDescriptionTable[ieDescription->next[idx]]);
             if (tmpBufBlkPtr == NULL) {
                 msgPivot += ieDescriptionTable[ieDescription->next[idx]].msgLen;
                 //UTLT_Info("TL type[%d], pivot %d", ieDescriptionTable[ieDescription->next[idx]].msgType, msgPivot);
                 continue;
             }
+#ifdef PFCP_LIB_TLV_TRACE
             if (dbf) {
-                    UTLT_Warning("tmpBuf T: %u, L: %d", ntohs(((uint16_t *)tmpBufBlkPtr->buf)[0]), ntohs(((uint16_t *)tmpBufBlkPtr->buf)[1]));
+                UTLT_Warning("_TlvBuildMsg: tmpBuf T: %u L: %d", 
+                    ntohs(((uint16_t *)tmpBufBlkPtr->buf)[0]), 
+                    ntohs(((uint16_t *)tmpBufBlkPtr->buf)[1]));
             }
-            UTLT_Assert(BufblkBuf(*bufBlkPtr, tmpBufBlkPtr) == STATUS_OK,
-                        BufblkFree(*bufBlkPtr); BufblkFree(tmpBufBlkPtr); return 0,
-                        "buffer block buffering error");
-
+#endif
+            BufblkBuf(*bufBlkPtr, tmpBufBlkPtr);
             //UTLT_Warning("bufBlk len %d", (*bufBlkPtr)->buf);
             BufblkFree(tmpBufBlkPtr);
             msgPivot += ieDescriptionTable[ieDescription->next[idx]].msgLen;
-            if (dbf) { UTLT_Info("buff offset: %d, buff Len: %d", bufOffset, (*bufBlkPtr)->len); }
+#ifdef PFCP_LIB_TLV_TRACE
+            if (dbf) { 
+                UTLT_Info("_TlvBuildMsg: buff offset: %d buff Len: %d", bufOffset, (*bufBlkPtr)->len); 
+            }
+#endif
         }
 
         *(((uint16_t *) (*bufBlkPtr)->buf) + 1) = htons(bufOffset);
@@ -445,13 +537,12 @@ int _TlvBuildMessage(Bufblk **bufBlkPtr, void *msg, IeDescription *ieDescription
 }
 
 void _PfcpBuildBody(Bufblk **bufBlkPtr, void *msg, IeDescription *ieDescription) {
-    UTLT_Assert(bufBlkPtr, return, "buffer error");
-    UTLT_Assert(msg, return, "message error");
+    UTLT_Assert(bufBlkPtr, return, "_PfcpBuildBody: buffer NULL");
+    UTLT_Assert(msg, return, "_PfcpBuildBody: message NULL");
 
     int idx;
     void *root = msg + sizeof(unsigned long);
     (*bufBlkPtr) = BufblkAlloc(1, 0);
-    UTLT_Assert((*bufBlkPtr), return, "buffer block alloc error");
     for (idx = 0; idx < ieDescription->numToParse; ++idx) {
         Bufblk *tmpBufBlkPtr;
         int rt = _TlvBuildMessage(&tmpBufBlkPtr, root, &ieDescriptionTable[ieDescription->next[idx]]);
@@ -459,9 +550,7 @@ void _PfcpBuildBody(Bufblk **bufBlkPtr, void *msg, IeDescription *ieDescription)
             root += ieDescriptionTable[ieDescription->next[idx]].msgLen;
             continue;
         }
-        UTLT_Assert(BufblkBuf(*bufBlkPtr, tmpBufBlkPtr) == STATUS_OK,
-            BufblkFree(*bufBlkPtr); BufblkFree(tmpBufBlkPtr); return, "buffer block buffering error");
-
+        BufblkBuf(*bufBlkPtr, tmpBufBlkPtr);
         BufblkFree(tmpBufBlkPtr);
         root += ieDescriptionTable[ieDescription->next[idx]].msgLen;
     }
@@ -469,7 +558,7 @@ void _PfcpBuildBody(Bufblk **bufBlkPtr, void *msg, IeDescription *ieDescription)
 
 Status PfcpBuildMessage(Bufblk **bufBlkPtr, PfcpMessage *pfcpMessage) {
     Status status = STATUS_OK;
-    UTLT_Assert(pfcpMessage, return STATUS_ERROR, "pfcpMessage error");
+    UTLT_Assert(pfcpMessage, return STATUS_ERROR, "PfcpBuildMsg: pfcpMessage NULL");
 
     switch(pfcpMessage->header.type) {
         case PFCP_HEARTBEAT_REQUEST:
@@ -541,23 +630,23 @@ Status PfcpBuildMessage(Bufblk **bufBlkPtr, PfcpMessage *pfcpMessage) {
             _PfcpBuildBody(bufBlkPtr, &pfcpMessage->pFCPSessionReportResponse, &ieDescriptionTable[PFCP_SESSION_REPORT_RESPONSE + 155 - (50-15) - 1]);
             break;
         default:
-            UTLT_Warning("Not implmented(type:%d)", &pfcpMessage->header.type);
+            UTLT_Warning("PfcpBuildMsg: Not implmented type: %d", &pfcpMessage->header.type);
     }
-    UTLT_Assert(*bufBlkPtr, status = STATUS_ERROR, "buffer block pointer error");
     return status;
 }
 
 Status _PfcpFreeIe(void *msg, IeDescription *ieDescription) {
-    UTLT_Assert(msg, return STATUS_ERROR, "message error");
-    if (((unsigned long*)msg)[0] == 0) {
+    UTLT_Assert(msg, return STATUS_ERROR, "_PfcpFreeIe: message NULL");
+
+    if (((unsigned long *) msg)[0] == 0) {
         // check present
         return STATUS_OK;
     }
     Status status = STATUS_OK;
 
     if (ieDescription->isTlvObj) {
-        status = UTLT_Free(((TlvOctet*)msg)->value);
-        UTLT_Assert(status == STATUS_OK, return STATUS_ERROR, "Free pfcp ie error");
+        status = UTLT_Free(((TlvOctet *)msg)->value);
+        UTLT_Assert(status == STATUS_OK, return STATUS_ERROR, "_PfcpFreeIe: failed to free value");
         return STATUS_OK;
     }
 
@@ -565,8 +654,7 @@ Status _PfcpFreeIe(void *msg, IeDescription *ieDescription) {
     void *root = msg + sizeof(unsigned long);
     for (idx = 0; idx < ieDescription->numToParse; ++idx) {
         status = _PfcpFreeIe(root, &ieDescriptionTable[ieDescription->next[idx]]);
-        UTLT_Assert(status == STATUS_OK, return STATUS_ERROR, "PFCP free error");
-
+        UTLT_Assert(status == STATUS_OK, return STATUS_ERROR, "_PfcpFreeIe: PFCP free error");
         root += ieDescriptionTable[ieDescription->next[idx]].msgLen;
     }
 
@@ -575,79 +663,101 @@ Status _PfcpFreeIe(void *msg, IeDescription *ieDescription) {
 
 Status PfcpStructFree(PfcpMessage *pfcpMessage) {
     Status status = STATUS_OK;
-    UTLT_Assert(pfcpMessage, return STATUS_ERROR, "pfcpMessage error");
+    UTLT_Assert(pfcpMessage, return STATUS_ERROR, "PfcpStructFree: pfcpMessage NULL");
 
     switch(pfcpMessage->header.type) {
         case PFCP_HEARTBEAT_REQUEST:
-            status = _PfcpFreeIe(&pfcpMessage->heartbeatRequest, &ieDescriptionTable[PFCP_HEARTBEAT_REQUEST + 155]);
+            status = _PfcpFreeIe(&pfcpMessage->heartbeatRequest, 
+                &ieDescriptionTable[PFCP_HEARTBEAT_REQUEST + 155]);
             break;
         case PFCP_HEARTBEAT_RESPONSE:
-            status = _PfcpFreeIe(&pfcpMessage->heartbeatResponse, &ieDescriptionTable[PFCP_HEARTBEAT_RESPONSE + 155]);
+            status = _PfcpFreeIe(&pfcpMessage->heartbeatResponse,
+                &ieDescriptionTable[PFCP_HEARTBEAT_RESPONSE + 155]);
             break;
         case PFCPPFD_MANAGEMENT_REQUEST:
-            status = _PfcpFreeIe(&pfcpMessage->pFCPPFDManagementRequest, &ieDescriptionTable[PFCPPFD_MANAGEMENT_REQUEST + 155]);
+            status = _PfcpFreeIe(&pfcpMessage->pFCPPFDManagementRequest, 
+                &ieDescriptionTable[PFCPPFD_MANAGEMENT_REQUEST + 155]);
             break;
         case PFCPPFD_MANAGEMENT_RESPONSE:
-            status = _PfcpFreeIe(&pfcpMessage->pFCPPFDManagementResponse, &ieDescriptionTable[PFCPPFD_MANAGEMENT_RESPONSE + 155]);
+            status = _PfcpFreeIe(&pfcpMessage->pFCPPFDManagementResponse, 
+                &ieDescriptionTable[PFCPPFD_MANAGEMENT_RESPONSE + 155]);
             break;
         case PFCP_ASSOCIATION_SETUP_REQUEST:
-            status = _PfcpFreeIe(&pfcpMessage->pFCPAssociationSetupRequest, &ieDescriptionTable[PFCP_ASSOCIATION_SETUP_REQUEST + 155]);
+            status = _PfcpFreeIe(&pfcpMessage->pFCPAssociationSetupRequest, 
+                &ieDescriptionTable[PFCP_ASSOCIATION_SETUP_REQUEST + 155]);
             break;
         case PFCP_ASSOCIATION_SETUP_RESPONSE:
-            status = _PfcpFreeIe(&pfcpMessage->pFCPAssociationSetupResponse, &ieDescriptionTable[PFCP_ASSOCIATION_SETUP_RESPONSE + 155]);
+            status = _PfcpFreeIe(&pfcpMessage->pFCPAssociationSetupResponse, 
+                &ieDescriptionTable[PFCP_ASSOCIATION_SETUP_RESPONSE + 155]);
             break;
         case PFCP_ASSOCIATION_UPDATE_REQUEST:
-            status = _PfcpFreeIe(&pfcpMessage->pFCPAssociationUpdateRequest, &ieDescriptionTable[PFCP_ASSOCIATION_UPDATE_REQUEST + 155]);
+            status = _PfcpFreeIe(&pfcpMessage->pFCPAssociationUpdateRequest, 
+                &ieDescriptionTable[PFCP_ASSOCIATION_UPDATE_REQUEST + 155]);
             break;
         case PFCP_ASSOCIATION_UPDATE_RESPONSE:
-            status = _PfcpFreeIe(&pfcpMessage->pFCPAssociationUpdateResponse, &ieDescriptionTable[PFCP_ASSOCIATION_UPDATE_RESPONSE + 155]);
+            status = _PfcpFreeIe(&pfcpMessage->pFCPAssociationUpdateResponse, 
+                &ieDescriptionTable[PFCP_ASSOCIATION_UPDATE_RESPONSE + 155]);
             break;
         case PFCP_ASSOCIATION_RELEASE_REQUEST:
-            status = _PfcpFreeIe(&pfcpMessage->pFCPAssociationReleaseRequest, &ieDescriptionTable[PFCP_ASSOCIATION_RELEASE_REQUEST + 155]);
+            status = _PfcpFreeIe(&pfcpMessage->pFCPAssociationReleaseRequest, 
+                &ieDescriptionTable[PFCP_ASSOCIATION_RELEASE_REQUEST + 155]);
             break;
         case PFCP_ASSOCIATION_RELEASE_RESPONSE:
-            status = _PfcpFreeIe(&pfcpMessage->pFCPAssociationReleaseResponse, &ieDescriptionTable[PFCP_ASSOCIATION_RELEASE_RESPONSE + 155]);
+            status = _PfcpFreeIe(&pfcpMessage->pFCPAssociationReleaseResponse, 
+                &ieDescriptionTable[PFCP_ASSOCIATION_RELEASE_RESPONSE + 155]);
             break;
         case PFCP_VERSION_NOT_SUPPORTED_RESPONSE:
             break;
         case PFCP_NODE_REPORT_REQUEST:
-            status = _PfcpFreeIe(&pfcpMessage->pFCPNodeReportRequest, &ieDescriptionTable[PFCP_NODE_REPORT_REQUEST + 155 - 1]);
+            status = _PfcpFreeIe(&pfcpMessage->pFCPNodeReportRequest, 
+                &ieDescriptionTable[PFCP_NODE_REPORT_REQUEST + 155 - 1]);
             break;
         case PFCP_NODE_REPORT_RESPONSE:
-            status = _PfcpFreeIe(&pfcpMessage->pFCPNodeReportResponse, &ieDescriptionTable[PFCP_NODE_REPORT_RESPONSE + 155 - 1]);
+            status = _PfcpFreeIe(&pfcpMessage->pFCPNodeReportResponse, 
+                &ieDescriptionTable[PFCP_NODE_REPORT_RESPONSE + 155 - 1]);
             break;
         case PFCP_SESSION_SET_DELETION_REQUEST:
-            status = _PfcpFreeIe(&pfcpMessage->pFCPSessionSetDeletionRequest, &ieDescriptionTable[PFCP_SESSION_SET_DELETION_REQUEST + 155 - 1]);
+            status = _PfcpFreeIe(&pfcpMessage->pFCPSessionSetDeletionRequest, 
+                &ieDescriptionTable[PFCP_SESSION_SET_DELETION_REQUEST + 155 - 1]);
             break;
         case PFCP_SESSION_SET_DELETION_RESPONSE:
-            status = _PfcpFreeIe(&pfcpMessage->pFCPSessionSetDeletionResponse, &ieDescriptionTable[PFCP_SESSION_SET_DELETION_RESPONSE + 155 - 1]);
+            status = _PfcpFreeIe(&pfcpMessage->pFCPSessionSetDeletionResponse, 
+                &ieDescriptionTable[PFCP_SESSION_SET_DELETION_RESPONSE + 155 - 1]);
             break;
         case PFCP_SESSION_ESTABLISHMENT_REQUEST:
-            status = _PfcpFreeIe(&pfcpMessage->pFCPSessionEstablishmentRequest, &ieDescriptionTable[PFCP_SESSION_ESTABLISHMENT_REQUEST + 155 - (50-15) - 1]);
+            status = _PfcpFreeIe(&pfcpMessage->pFCPSessionEstablishmentRequest, 
+                &ieDescriptionTable[PFCP_SESSION_ESTABLISHMENT_REQUEST + 155 - (50 - 15) - 1]);
             break;
         case PFCP_SESSION_ESTABLISHMENT_RESPONSE:
-            status = _PfcpFreeIe(&pfcpMessage->pFCPSessionEstablishmentResponse, &ieDescriptionTable[PFCP_SESSION_ESTABLISHMENT_RESPONSE + 155 - (50-15) - 1]);
+            status = _PfcpFreeIe(&pfcpMessage->pFCPSessionEstablishmentResponse, 
+                &ieDescriptionTable[PFCP_SESSION_ESTABLISHMENT_RESPONSE + 155 - (50 - 15) - 1]);
             break;
         case PFCP_SESSION_MODIFICATION_REQUEST:
-            status = _PfcpFreeIe(&pfcpMessage->pFCPSessionModificationRequest, &ieDescriptionTable[PFCP_SESSION_MODIFICATION_REQUEST + 155 - (50-15) - 1]);
+            status = _PfcpFreeIe(&pfcpMessage->pFCPSessionModificationRequest, 
+                &ieDescriptionTable[PFCP_SESSION_MODIFICATION_REQUEST + 155 - (50 - 15) - 1]);
             break;
         case PFCP_SESSION_MODIFICATION_RESPONSE:
-            status = _PfcpFreeIe(&pfcpMessage->pFCPSessionModificationResponse, &ieDescriptionTable[PFCP_SESSION_MODIFICATION_RESPONSE + 155 - (50-15) - 1]);
+            status = _PfcpFreeIe(&pfcpMessage->pFCPSessionModificationResponse, 
+                &ieDescriptionTable[PFCP_SESSION_MODIFICATION_RESPONSE + 155 - (50 - 15) - 1]);
             break;
         case PFCP_SESSION_DELETION_REQUEST:
-            status = _PfcpFreeIe(&pfcpMessage->pFCPSessionDeletionRequest, &ieDescriptionTable[PFCP_SESSION_DELETION_REQUEST + 155 - (50-15) - 1]);
+            status = _PfcpFreeIe(&pfcpMessage->pFCPSessionDeletionRequest, 
+                &ieDescriptionTable[PFCP_SESSION_DELETION_REQUEST + 155 - (50 - 15) - 1]);
             break;
         case PFCP_SESSION_DELETION_RESPONSE:
-            status = _PfcpFreeIe(&pfcpMessage->pFCPSessionDeletionResponse, &ieDescriptionTable[PFCP_SESSION_DELETION_RESPONSE + 155 - (50-15) - 1]);
+            status = _PfcpFreeIe(&pfcpMessage->pFCPSessionDeletionResponse, 
+                &ieDescriptionTable[PFCP_SESSION_DELETION_RESPONSE + 155 - (50 - 15) - 1]);
             break;
         case PFCP_SESSION_REPORT_REQUEST:
-            status = _PfcpFreeIe(&pfcpMessage->pFCPSessionReportRequest, &ieDescriptionTable[PFCP_SESSION_REPORT_REQUEST + 155 - (50-15) - 1]);
+            status = _PfcpFreeIe(&pfcpMessage->pFCPSessionReportRequest, 
+                &ieDescriptionTable[PFCP_SESSION_REPORT_REQUEST + 155 - (50 - 15) - 1]);
             break;
         case PFCP_SESSION_REPORT_RESPONSE:
-            status = _PfcpFreeIe(&pfcpMessage->pFCPSessionReportResponse, &ieDescriptionTable[PFCP_SESSION_REPORT_RESPONSE + 155 - (50-15) - 1]);
+            status = _PfcpFreeIe(&pfcpMessage->pFCPSessionReportResponse, 
+                &ieDescriptionTable[PFCP_SESSION_REPORT_RESPONSE + 155 - (50 - 15) - 1]);
             break;
         default:
-            UTLT_Warning("Not implmented(type:%d)", &pfcpMessage->header.type);
+            UTLT_Warning("PfcpStructFree: Not implmented type:%d", &pfcpMessage->header.type);
   }
 
   return status;

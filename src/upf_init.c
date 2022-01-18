@@ -44,6 +44,8 @@ static Status PfcpTerm(void *data);
 void PacketReceiverThread(ThreadID id, void *data);
 
 static char configFilePath[MAX_FILE_PATH_STRLEN] = "./config/upfcfg.yaml";
+static char nfLogFilePath[MAX_FILE_PATH_STRLEN] = "./log/upf.log";
+static char free5gcLogFilePath[MAX_FILE_PATH_STRLEN] = "";
 
 UpfOps UpfOpsList[] = {
     {
@@ -150,14 +152,72 @@ UpfOps UpfOpsList[] = {
 };
 
 Status UpfSetConfigPath(char *path) {
+    if (path == NULL) {
+        UTLT_Error("Configuration is null point");
+        return STATUS_ERROR;
+    }
+
+    if (strlen(path) > (sizeof(configFilePath) - 1)) {
+        UTLT_Error("Configuration path length (%d) > buffer length (%d)", strlen(path), (sizeof(configFilePath) - 1));
+        return STATUS_ERROR;
+    }
     strcpy(configFilePath, path);
+    return STATUS_OK;
+}
+
+Status UpfSetNfLogPath(char *path) {
+    if (path == NULL) {
+        UTLT_Error("NF path is null point");
+        return STATUS_ERROR;
+    }
+
+    if (strlen(path) > (sizeof(nfLogFilePath) - 1)) {
+        UTLT_Error("NF log path length (%d) > buffer length (%d)", strlen(path), (sizeof(nfLogFilePath) - 1));
+        return STATUS_ERROR;
+    }
+    strcpy(nfLogFilePath, path);
+    return STATUS_OK;
+}
+
+Status UpfSetFree5gcLogPath(char *path) {
+    if (path == NULL) {
+        UTLT_Error("Free5gc path is null point");
+        return STATUS_ERROR;
+    }
+
+    if (strlen(path) > (sizeof(free5gcLogFilePath) - 1)) {
+        UTLT_Error("Free5GC log path length (%d) > buffer length (%d)", strlen(path), (sizeof(free5gcLogFilePath) - 1));
+        return STATUS_ERROR;
+    }
+    strcpy(free5gcLogFilePath, path);
     return STATUS_OK;
 }
 
 Status UpfInit() {
     Status status = STATUS_OK;
 
-    UTLT_Assert(GetAbsPath(configFilePath) == STATUS_OK, 
+    UTLT_Assert(UTIL_LogFileHook(nfLogFilePath, free5gcLogFilePath) == STATUS_OK,
+        return STATUS_ERROR, "Log file hool error, nf path: %s, free5gc path: %s", nfLogFilePath, free5gcLogFilePath);
+    
+#ifdef PFCP_REQUEST_DROP_COUNT
+    UTLT_Info("PFCP_REQUEST_DROP_COUNT: %d", PFCP_REQUEST_DROP_COUNT);
+#endif
+#ifdef PFCP_RESPONSE_DROP_COUNT
+    UTLT_Info("PFCP_REQUEST_DROP_COUNT: %d", PFCP_RESPONSE_DROP_COUNT);
+#endif
+
+    if (strlen(free5gcLogFilePath) > 0) {
+        UTLT_Assert(GetAbsPath(free5gcLogFilePath) == STATUS_OK,
+            return STATUS_ERROR, "Invalid free5gc log path: %s", free5gcLogFilePath);
+        UTLT_Info("Free5GC log: %s", free5gcLogFilePath);
+    }
+    if (strlen(nfLogFilePath) > 0) {
+        UTLT_Assert(GetAbsPath(nfLogFilePath) == STATUS_OK,
+            return STATUS_ERROR, "Invalid UPF log path: %s", nfLogFilePath);
+        UTLT_Info("UPF log: %s", nfLogFilePath);
+    }
+
+    UTLT_Assert(GetAbsPath(configFilePath) == STATUS_OK,
         return STATUS_ERROR, "Invalid config path: %s", configFilePath);
     UTLT_Info("Config: %s", configFilePath);
 
@@ -166,7 +226,7 @@ Status UpfInit() {
             status = UpfOpsList[i].init(UpfOpsList[i].initData);
             UTLT_Assert(status == STATUS_OK, status |= STATUS_ERROR; break,
                 "%s error when UPF initializes", UpfOpsList[i].name);
-            
+
             UTLT_Trace("%s is finished in UPF initialization", UpfOpsList[i].name);
         }
     }
@@ -184,7 +244,7 @@ Status UpfTerm() {
             UTLT_Trace("%s is finished in UPF termination", UpfOpsList[i].name);
         }
     }
-    
+
     return status;
 }
 
@@ -222,11 +282,12 @@ static Status ConfigHandle(void *data) {
 static Status EpollInit(void *data) {
     UTLT_Assert((Self()->epfd = EpollCreate()) >= 0,
         return STATUS_ERROR, "");
-    
+
     return STATUS_OK;
 }
 
 static Status EpollTerm(void *data) {
+    UTLT_Error("EpollTerm: close epfd");
     close(Self()->epfd);
 
     return STATUS_OK;
@@ -248,55 +309,50 @@ static Status EventQueueTerm(void *data) {
 
 static Status PacketRecvThreadInit(void *data) {
     ThreadFuncType threadFuncPtr = data;
-    
+
     UTLT_Assert(ThreadCreate(&Self()->pktRecvThread, threadFuncPtr, NULL) == STATUS_OK,
         return STATUS_ERROR, "");
-    
+
     return STATUS_OK;
 }
 
 static Status PacketRecvThreadTerm(void *data) {
+    UTLT_Error("Packet receiver thread Terminates");
+
     UTLT_Assert(ThreadDelete(Self()->pktRecvThread) == STATUS_OK,
         return STATUS_ERROR, "");
 
     return STATUS_OK;
 }
 
+/*
+ * Main Packet Receiver Thread for PFCP, GTP-U, ... 
+ */
 void PacketReceiverThread(ThreadID id, void *data) {
     Status status;
-
-    int nfds;
+    int nfds, i;
     Sock *sockPtr;
     struct epoll_event events[MAX_NUM_OF_EVENT];
-    utime_t prev, now; // For timer checking purpose
-
-    prev = TimeNow();
+    
+    UTLT_Info("Packet receiver thread started!!!");
 
     while (!ThreadStop()) {
-        nfds = EpollWait(Self()->epfd, events, 300);
-        UTLT_Assert(nfds >= 0, , "Epoll Wait error : %s", strerror(errno));
-
-        for (int i = 0; i < nfds; i++) {
+        nfds = EpollWait(Self()->epfd, events, 300); 
+        UTLT_Assert(nfds >= 0, , "PRT: Epoll Wait error : %s", 
+            strerror(errno));
+       
+        for (i = 0; i < nfds; i++) {
             sockPtr = events[i].data.ptr;
             status = sockPtr->handler(sockPtr, sockPtr->data);
-            // TODO : Log may show which socket
-            UTLT_Assert(status == STATUS_OK, , "Error handling UP socket");
+
+            UTLT_Assert(status == STATUS_OK, , 
+                "PRT: socket fd: %d handler returned err: %d",
+                sockPtr->fd, status);
         }
-
-        // Check if timer expired
-        now = TimeNow();
-        if (now - prev > 10) {
-            TimerExpireCheck(
-                    &Self()->timerServiceList, Self()->eventQ);
-
-            prev = now;
-        }
-
     }
 
     sem_post(((Thread *)id)->semaphore);
-    UTLT_Trace("Packet receiver thread terminated");
-
+    UTLT_Error("Packet receiver thread stopped!!!");
     return;
 }
 
@@ -340,7 +396,8 @@ static Status PfcpInit(void *data) {
 
     // init pfcp xact context
     UTLT_Assert(PfcpXactInit(&Self()->timerServiceList,
-                    UPF_EVENT_N4_T3_RESPONSE, UPF_EVENT_N4_T3_HOLDING) == STATUS_OK,
+        UPF_EVENT_N4_T3_RESPONSE, 
+        UPF_EVENT_N4_T3_HOLDING) == STATUS_OK,
         status |= STATUS_ERROR, "");
 
     return status;

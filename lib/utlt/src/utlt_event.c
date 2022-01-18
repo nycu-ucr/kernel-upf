@@ -94,3 +94,7 @@ TimerBlkID EventTimerCreate(TimerList *timerList, int type, uint32_t duration, u
 
     return id;
 }
+
+void EventTimerDelete(TimerBlkID id) {
+   TimerDelete(id);
+}

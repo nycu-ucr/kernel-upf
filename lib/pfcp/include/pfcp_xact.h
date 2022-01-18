@@ -16,6 +16,13 @@
 extern "C" {
 #endif /* __cplusplus */
 
+typedef enum {
+    PFCP_XACT_UNKNOWN_STAGE,
+    PFCP_XACT_INITIAL_STAGE,
+    PFCP_XACT_INTERMEDIATE_STAGE,
+    PFCP_XACT_FINAL_STAGE,
+} PfcpXactStage;
+
 typedef struct _PfcpXact {
     ListHead    node;
     uint32_t    index;
@@ -26,37 +33,23 @@ typedef struct _PfcpXact {
     uint32_t    transactionId;
     PfcpNode    *gnode;
 
-    int         step;               // 1: Init, 2: Trigger, 3: Trigger Reply
+    int         step;               /* 0: ?, 1: Init, 2: Trigger, 3: Trigger Reply */
     struct {
-        uint8_t type;
+        uint8_t type;               
         Bufblk  *bufBlk;
-    } seq[3];
-
-    TimerBlkID  timerResponse;
-    uint8_t     responseReCount;
-    TimerBlkID  timerHolding;
-    uint8_t     holdingReCount;
+    } seq[3]; /* 0: Rx, 1: Tx, 2: ?*/
 
     struct _PfcpXact    *associatedXact;
-
-#define PfcpXactStoreSession(xact, session) \
-    do { \
-        UTLT_Assert((xact), break, "xact error"); \
-        UTLT_Assert((session), break, "session error"); \
-        ((xact)->session) = (session); \
-    } while(0)
 
     void        *session;
     void        *gtpXact;
     Bufblk      *gtpBuf;
 } PfcpXact;
 
-typedef enum {
-    PFCP_XACT_UNKNOWN_STAGE,
-    PFCP_XACT_INITIAL_STAGE,
-    PFCP_XACT_INTERMEDIATE_STAGE,
-    PFCP_XACT_FINAL_STAGE,
-} PfcpXactStage;
+#define PfcpXactStoreSession(xact, session) \
+    do {                                    \
+        ((xact)->session) = (session);      \
+    } while(0)
 
 Status PfcpXactInit(TimerList *timerList, uintptr_t responseEvent, uintptr_t holdingEvent);
 Status PfcpXactTerminate();

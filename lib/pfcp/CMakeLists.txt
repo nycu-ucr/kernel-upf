@@ -36,3 +36,6 @@ target_include_directories(${PROJECT_NAME} PRIVATE
 )
 #target_compile_options(${PROJECT_NAME} PRIVATE -Wall -Werror)
 #add_dependencies(${PROJECT_NAME} pfcp_support)
+
+# PFCP Library trace the TLV
+#target_compile_definitions(${PROJECT_NAME} PRIVATE PFCP_LIB_TLV_TRACE=1)

@@ -1,7 +1,6 @@
 cmake_minimum_required(VERSION 3.5)
 
 project(free5GC_updk C)
-
 set(UPDK_SOURCE_DIR "${CMAKE_SOURCE_DIR}/updk")
 
 # Sources

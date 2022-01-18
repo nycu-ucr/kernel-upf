@@ -386,6 +386,23 @@ Status TestGetAddr_2() {
     return STATUS_OK;
 }
 
+Status TestFqdnEncode_1() {
+    char output[256];
+    Status status;
+
+    char *fqdnStr = "www.example.com";
+    char expected[] = {
+        0x3, 0x77, 0x77, 0x77,
+        0x7, 0x65, 0x78, 0x61, 0x6D, 0x70, 0x6C, 0x65,
+        0x3, 0x63, 0x6F, 0x6D, 0x0
+    };
+    status = FqdnEncode(output, fqdnStr, sizeof(output));
+    UTLT_Assert(STATUS_OK == status, return STATUS_ERROR, "");
+    UTLT_Assert(!strcmp(output, expected), return STATUS_ERROR, "");
+
+    return STATUS_OK;
+}
+
 Status NetworkTest(void *data) {
     Status status;
 
@@ -410,6 +427,9 @@ Status NetworkTest(void *data) {
     status = TestGetAddr_2();
     UTLT_Assert(status == STATUS_OK, return status, "TestGetAddr_2 fail");
     
+    status = TestFqdnEncode_1();
+    UTLT_Assert(status == STATUS_OK, return status, "TestFqdnEncode_1 fail");
+
     status = SockPoolFinal();
     UTLT_Assert(status == STATUS_OK, return status, "SockPoolFinal fail");
 

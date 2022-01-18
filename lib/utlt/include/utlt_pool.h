@@ -3,6 +3,7 @@
 
 #include <pthread.h>
 
+#define STR(x)   #x
 #define PoolDeclare(__name, __type, __cap) \
     typedef struct { \
         int qFront, qEnd, qCap; \
@@ -25,7 +26,7 @@
     for (int __i = 0; __i < __cap; __i++) \
         (__nameptr)->queueAvail[__i] = &((__nameptr)->pool[__i]); \
     pthread_mutex_init(&(__nameptr)->lock, 0); \
-    UTLT_Trace("Pool Init Finish: %d", PoolSize(__nameptr)); \
+    UTLT_Trace("%s Pool Init Finish: %d", STR(__nameptr), PoolSize(__nameptr)); \
 } while(0)
 
 #define PoolTerminate(__nameptr) pthread_mutex_destroy(&(__nameptr)->lock)
@@ -35,11 +36,11 @@
     if (PoolSize(__nameptr) > 0) { \
         (__assignedPtr) = (__nameptr)->queueAvail[(__nameptr)->qFront]; \
         (__nameptr)->qFront = ((__nameptr)->qFront + 1) % ((__nameptr)->qCap + 1); \
-        UTLT_Debug("Pool alloc successful, total capacity[%d], available[%d]" \
-        , PoolCap(__nameptr), PoolSize(__nameptr)); \
+        UTLT_Debug("%s Pool alloc successful, total capacity[%d], available[%d]" \
+            ,STR(__nameptr) , PoolCap(__nameptr), PoolSize(__nameptr)); \
     } else { \
         (__assignedPtr) = NULL; \
-        UTLT_Warning("Pool is empty"); \
+        UTLT_Warning("%s Pool is empty", STR(__nameptr)); \
     } \
     pthread_mutex_unlock(&(__nameptr)->lock); \
 } while(0)
@@ -50,10 +51,10 @@
     if (PoolSize(__nameptr) < (__nameptr)->qCap) { \
         (__nameptr)->queueAvail[(__nameptr)->qEnd] = (__assignedPtr); \
         (__nameptr)->qEnd = ((__nameptr)->qEnd + 1) % ((__nameptr)->qCap + 1); \
-        UTLT_Debug("Pool Free successful, total capacity[%d], available[%d]" \
-        , PoolCap(__nameptr), PoolSize(__nameptr)); \
+        UTLT_Debug("%s Pool Free successful, total capacity[%d], available[%d]" \
+            ,STR(__nameptr), PoolCap(__nameptr), PoolSize(__nameptr)); \
     } else { \
-        UTLT_Error("Pool is full, it may not belong to this pool"); \
+        UTLT_Error("%s Pool is full, it may not belong to this pool", STR(__nameptr)); \
     } \
     pthread_mutex_unlock(&(__nameptr)->lock); \
 } while(0)

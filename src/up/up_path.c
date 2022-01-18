@@ -9,7 +9,7 @@
 #define TRACE_MODULE _up_path
 
 #include "up_path.h"
-
+#include <stdio.h>
 #include "utlt_debug.h"
 #include "utlt_network.h"
 #include "utlt_buff.h"
@@ -102,7 +102,7 @@ Status GtpHandleEchoRequest(Sock *sock, void *data) {
     if (gtpRespHrd.flags & 0x03) {
         Gtpv1OptHeader *opthrd = (void *)((uint8_t *) data + GTPV1_HEADER_LEN);
         Gtpv1OptHeader gtpOptHrd = {
-            ._seqNum = (gtpRespHrd.flags & 0x02) ? htons(ntohs(opthrd->_seqNum)) : 0,
+            ._seqNum = (gtpRespHrd.flags & 0x02) ? htons(ntohs(opthrd->_seqNum) + 1) : 0,
             .nPdnNum = (gtpRespHrd.flags & 0x01) ? opthrd->nPdnNum : 0,
         };
         BufblkBytes(optPkt, (void *) &gtpOptHrd, sizeof(gtpOptHrd));
@@ -186,30 +186,56 @@ Status UpSendPacketByPdrFar(UpfPDR *pdr, UpfFAR *far, Sock *sock) {
 
         uint16_t pdrId = pdr->pdrId;
         UpfBufPacket *bufStorage = UpfBufPacketFindByPdrId(pdrId);
-        if (bufStorage->packetBuffer) {
-            UTLT_Assert(!pthread_spin_lock(&Self()->buffLock),
-                        return STATUS_ERROR, "spin lock buffLock error");
+        
+        unsigned int buffer_index = 0;
+        if(bufStorage != NULL){
+            buffer_index = bufStorage->used_buffer_length;
+        }
 
-            Bufblk *sendBuf = BufblkAlloc(1, 0x40);
-            gtpHdr._length = htons(bufStorage->packetBuffer->len);
-            BufblkBytes(sendBuf, (void*)&gtpHdr, GTPV1_HEADER_LEN);
-            BufblkBuf(sendBuf, bufStorage->packetBuffer);
+        int i;
 
-            status = UdpSendTo(sock, sendBuf->buf, sendBuf->len);
-            UTLT_Assert(status == STATUS_OK, return status, "UdpSendTo failed");
-            BufblkClear(sendBuf);
+        UTLT_Assert(!pthread_spin_lock(&Self()->buffLock),
+                return STATUS_ERROR, "spin lock buffLock error");
+        Bufblk *sendBuf = BufblkAlloc(1, 0x40);
+        for(i = 0 ; i < buffer_index ; i++){
+            if (bufStorage->packetBuffer[i]) {
 
-            while (pthread_spin_unlock(&Self()->buffLock)) {
-                // if unlock failed, keep trying
-                UTLT_Error("spin unlock error");
+                gtpHdr._length = htons(bufStorage->packetBuffer[i]->len);
+                BufblkBytes(sendBuf, (void*)&gtpHdr, GTPV1_HEADER_LEN);
+                //enlager gtp header to 16byte
+                char GTPEX[8]={1,2,3,4,5,6,7,8};
+                BufblkBytes(sendBuf, (void *)GTPEX, 8);
+                BufblkBuf(sendBuf, bufStorage->packetBuffer[i]);
+
+                status = UdpSendTo(sock, sendBuf->buf, sendBuf->len);
+                UTLT_Assert(status == STATUS_OK, return status, "UdpSendTo failed");
+                BufblkClear(sendBuf);
+                
+                status = BufblkFree(bufStorage->packetBuffer[i]);
+                if (status == STATUS_OK)
+                    bufStorage->packetBuffer[i] = NULL;
+                else
+                    UTLT_Error("Free packet buffer failed");
+                
+            }else{
+                UTLT_Debug("bufStorage is NULL");
             }
-            status = BufblkFree(bufStorage->packetBuffer);
-        } else {
-            UTLT_Debug("bufStorage is NULL");
+        }
+        BufblkFree(sendBuf);
+        printf("sent %d buffer packets\n",buffer_index);
+        bufStorage->used_buffer_length = 0;
+
+        while (pthread_spin_unlock(&Self()->buffLock)) {
+            // if unlock failed, keep trying
+            UTLT_Error("spin unlock error");
         }
         UTLT_Assert(status == STATUS_OK, return status,
                     "Free packet buffer failed");
-        bufStorage->packetBuffer = NULL;
+/*
+        for(i = 0 ; i < MAX_NUM_PACKET ; i++){
+            bufStorage->packetBuffer[i] = NULL;
+        }
+*/
     } else {
         UTLT_Warning("outer header creatation not implement: "
                      "GTP-IPV6, IPV4, IPV6");

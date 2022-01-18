@@ -7,13 +7,15 @@ import (
 
 	formatter "github.com/antonfisher/nested-logrus-formatter"
 	"github.com/sirupsen/logrus"
-
-	"github.com/free5gc/logger_conf"
+	//logger_util "bitbucket.org/free5gc-team/util/logger"
+	//"github.com/free5gc/logger_conf"
 	"github.com/free5gc/logger_util"
 )
 
 var log *logrus.Logger
 var UpfUtilLog *logrus.Entry
+
+
 
 func init() {
 	log = logrus.New()
@@ -27,17 +29,34 @@ func init() {
 		FieldsOrder:     []string{"component", "category"},
 	}
 
-	free5gcLogHook, err := logger_util.NewFileHook(logger_conf.Free5gcLogFile, os.O_CREATE|os.O_APPEND|os.O_RDWR, 0666)
-	if err == nil {
-		log.Hooks.Add(free5gcLogHook)
-	}
-
-	selfLogHook, err := logger_util.NewFileHook(logger_conf.NfLogDir+"upf.log", os.O_CREATE|os.O_APPEND|os.O_RDWR, 0666)
-	if err == nil {
-		log.Hooks.Add(selfLogHook)
-	}
-
 	UpfUtilLog = log.WithFields(logrus.Fields{"component": "UPF", "category": "Util"})
+}
+
+
+func logFileHook(logNfPath string, log5gcPath string) error {
+	if fullPath, err := logger_util.CreateFree5gcLogFile(log5gcPath); err == nil {
+		if fullPath != "" {
+			free5gcLogHook, hookErr := logger_util.NewFileHook(fullPath, os.O_CREATE|os.O_APPEND|os.O_RDWR, 0o666)
+			if hookErr != nil {
+				return hookErr
+			}
+			log.Hooks.Add(free5gcLogHook)
+		}
+	} else {
+		return err
+	}
+
+	if fullPath, err := logger_util.CreateNfLogFile(logNfPath, "upf.log"); err == nil {
+		selfLogHook, hookErr := logger_util.NewFileHook(fullPath, os.O_CREATE|os.O_APPEND|os.O_RDWR, 0o666)
+		if hookErr != nil {
+			return hookErr
+		}
+		log.Hooks.Add(selfLogHook)
+	} else {
+		return err
+	}
+
+	return nil
 }
 
 func SetLogLevel(level logrus.Level) {
@@ -45,10 +64,15 @@ func SetLogLevel(level logrus.Level) {
 	log.SetLevel(level)
 }
 
-//func SetReportCaller(reportCaller bool) {
-//	UpfUtilLog.Infoln("Report caller:", reportCaller)
-//	log.SetReportCaller(reportCaller)
-//}
+//export UpfUtilLog_FileHook
+func UpfUtilLog_FileHook(logNfPath string, log5gcPath string) bool {
+	if err := logFileHook(logNfPath, log5gcPath); err != nil {
+		UpfUtilLog.Errorln("Error: log file hook: ", err)
+		return false
+	} else {
+		return true
+	}
+}
 
 //export UpfUtilLog_SetLogLevel
 func UpfUtilLog_SetLogLevel(levelString string) bool {

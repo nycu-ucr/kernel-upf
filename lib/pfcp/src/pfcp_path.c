@@ -174,7 +174,7 @@ Status PfcpReceiveFrom(Sock *sock, Bufblk **bufBlk, SockAddr *from) {
     if (*bufBlk == NULL) {
         char tmpBuf[MAX_SDU_LEN];
 
-        UTLT_Fatal("Can't allocate Buffer");
+        UTLT_Fatal("PfcpReceiveFrom: Can't allocate Buffer");
 
         SockRecvFrom(sock, tmpBuf, MAX_SDU_LEN);
         return STATUS_ERROR;
@@ -182,7 +182,7 @@ Status PfcpReceiveFrom(Sock *sock, Bufblk **bufBlk, SockAddr *from) {
 
     size = UdpRecvFrom(sock, (*bufBlk)->buf, (*bufBlk)->size);
 
-    UTLT_Debug("PFCP Receive packet: (local bind) %s:%d, (remote get) %s:%d",
+    UTLT_Debug("PfcpReceiveFrom: (local bind) %s:%d, (remote get) %s:%d",
                GetIP(&sock->localAddr), GetPort(&sock->localAddr),
                GetIP(&sock->remoteAddr), GetPort(&sock->remoteAddr));
 
@@ -190,7 +190,7 @@ Status PfcpReceiveFrom(Sock *sock, Bufblk **bufBlk, SockAddr *from) {
         BufblkFree(*bufBlk);
 
         if (errno != EAGAIN) {
-            UTLT_Warning("SockRecvFromAddr failed(%d:%s)", errno,
+            UTLT_Warning("PfcpReceiveFrom: failed(%d:%s)", errno,
                          strerror(errno));
         }
 

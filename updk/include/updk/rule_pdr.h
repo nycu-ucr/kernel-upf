@@ -215,12 +215,16 @@ typedef struct {
  * @outerHeaderRemoval: UP function is required to remove one or more outer header(s) 
  *     from the packets matching this PDR.
  * @farId: The FAR ID to be associated to the PDR.
- * @urrId: The QER IDs to be associated to the PDR. Several IEs within the same IE type
+ * @urrId: The URR IDs to be associated to the PDR. Several IEs within the same IE type
  *     may be present to represent a list of QERs to be associated to the PDR.
  * @qerId: The QER IDs to be associated to the PDR. Several IEs within the same IE type
  *     may be present to represent a list of QERs to be associated to the PDR.
  * @activatePredefinedRules: Octect string contains one Predefined Rules name. Several IEs
  *     with the same IE type may be present to represent multiple "Activate Predefined Rules" names.
+ *
+ * Note: Currently, we supported each PDR should have 4 QER_IDs
+ *		 TODO: Support multiple QER_IDs per PDR
+ *		 TODO: Support multiple URR_IDs per PDR
  */
 typedef struct {
     struct {

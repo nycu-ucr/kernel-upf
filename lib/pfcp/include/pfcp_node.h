@@ -13,18 +13,20 @@ extern "C" {
 
 typedef struct _PfcpNode {
     ListHead        node;           /* List of node for PFCP */
-    SockAddr        *saList;               /* Socket Address list */
+    SockAddr        *saList;        /* Socket Address list */
     Sock            *sock;
     Ip              ip;
 
     ListHead        localList;
-    ListHead        remoteList;
+    ListHead        remoteXactList;
 
+    uint8_t         state;            /* Association complete or not */
 #define PFCP_NODE_ST_NULL           0
-#define PFCP_NODE_ST_ASSOCIATED     1    
-    uint8_t         state;          /* Association complete or not */
+#define PFCP_NODE_ST_ASSOCIATED     1  
+
     TimerBlkID      timeHeartbeat;    /* no timer lib */
     PfcpNodeId      nodeId;
+    
     union {
         uint8_t     upFunctionFeatures;
         uint8_t     cpFunctionFeatures;
@@ -34,10 +36,7 @@ typedef struct _PfcpNode {
 
 Status PfcpNodeInit();
 Status PfcpNodeTerminate();
-Status PfcpAddNode(ListHead *list, PfcpNode **node,
-                   const SockAddr *allList, _Bool noIpv4, _Bool noIpv6, _Bool preferIpv4);
-PfcpNode *PfcpAddNodeWithSeid(ListHead *list, PfcpFSeid *fSeid,
-        uint16_t port, _Bool noIpv4, _Bool noIpv6, _Bool preferIpv4);
+PfcpNode * PfcpAddNodeWithSock(ListHead *list, SockAddr *from);
 Status PfcpRemoveNode(ListHead *list, PfcpNode *node);
 Status PfcpRemoveAllNodes(ListHead *list);
 PfcpNode *PfcpFindNode(ListHead *list, PfcpFSeid *fSeid);

@@ -394,18 +394,47 @@ static int PacketInBufferHandle(uint8_t *pkt, uint16_t pktlen, UPDK_PDR *matched
         UTLT_Assert(!pthread_spin_lock(&Self()->buffLock), return -1,
                     "spin lock buffLock error");
 
-        if (!packetStorage->packetBuffer) {
-            // if packetBuffer null, allocate space
-            // reuse the pktbuf, so don't free it
-            packetStorage->packetBuffer = BufblkAlloc(1, MAX_SIZE_OF_PACKET);
-            UTLT_Assert(packetStorage->packetBuffer, return -1, "UpfBufPacket alloc failed");
+        unsigned int buffer_index = packetStorage->used_buffer_length;
+        if(buffer_index < MAX_NUM_PACKET){
+            if (!packetStorage->packetBuffer[buffer_index]) {
+                // if packetBuffer null, allocate space
+                // reuse the pktbuf, so don't free it
+                packetStorage->packetBuffer[buffer_index] = BufblkAlloc(1, MAX_SIZE_OF_PACKET);
+                UTLT_Assert(packetStorage->packetBuffer[buffer_index], return -1, "UpfBufPacket alloc failed");
+            }else{
+                printf("this index has been used\n");
+            }
+            
+            //check if the buffer is enough
+            if( packetStorage->packetBuffer[buffer_index]->size - packetStorage->packetBuffer[buffer_index]->len < pktlen){
+                printf("packet buffer for per packet is full\n");
+            }else{
+                // if packetBuffer not null, just add packet followed
+                status = BufblkBytes(packetStorage->packetBuffer[buffer_index], (const char *) pkt, pktlen);
+                packetStorage->used_buffer_length++;
+
+                UTLT_Assert(status == STATUS_OK, return -1,
+                            "block add behand old buffer error");
+            }
+        }else{
+            printf("packet buffer for whole session is full\n");
         }
 
-        // if packetBuffer not null, just add packet followed
-        status = BufblkBytes(packetStorage->packetBuffer, (const char *) pkt, pktlen);
-        UTLT_Assert(status == STATUS_OK, return -1,
-                    "block add behand old buffer error");
 
+#if 0
+        //check if the buffer + size(pktlen) is enough
+        if( packetStorage->packetBuffer->size - packetStorage->packetBuffer->len < pktlen+sizeof(pktlen)){
+            printf("packet buffer is full\n");
+        }else{
+            //also append the packet len in memory, it will help check the packet size in sending buffered packets function
+            BufblkBytes(packetStorage->packetBuffer, (const char *) &pktlen, sizeof(pktlen));
+            // if packetBuffer not null, just add packet followed
+            status = BufblkBytes(packetStorage->packetBuffer, (const char *) pkt, pktlen);
+
+            UTLT_Assert(status == STATUS_OK, return -1,
+                        "block add behand old buffer error");
+        }
+#endif
         while (pthread_spin_unlock(&Self()->buffLock)) {
             // if unlock failed, keep trying
             UTLT_Error("spin unlock error");
@@ -413,10 +442,11 @@ static int PacketInBufferHandle(uint8_t *pkt, uint16_t pktlen, UPDK_PDR *matched
 
         if (action & PFCP_FAR_APPLY_ACTION_NOCP) {
             // If NOCP, Send event to notify SMF
-            uint64_t seid = ((UpfSession*) packetStorage->sessionPtr)->upfSeid;
+            UpfSession *sess = (UpfSession *) packetStorage->sessionPtr;
+            uint64_t seid = sess->upfSeid;
             UTLT_Debug("buffer NOCP to SMF: SEID: %u, PDRID: %u", seid, pdrId);
-            status = EventSend(Self()->eventQ, UPF_EVENT_SESSION_REPORT, 2,
-                            seid, pdrId);
+            status = EventSend(Self()->eventQ, UPF_EVENT_SESSION_REPORT, 3,
+                sess, seid, pdrId);
             UTLT_Assert(status == STATUS_OK, ,
                         "DL data message event send to N4 failed");
         }
@@ -447,7 +477,6 @@ int PacketInWithL3(uint8_t *pkt, uint16_t pktlen, void *matchedPDR) {
         status = FindPDRByUEIP(pkt, pktlen, 0, matchedPDR);
         UTLT_Level_Assert(LOG_DEBUG, status == STATUS_OK, goto MATCHFAILED, "Packet match with L3/L4 header failed");
     }
-
     return PacketInBufferHandle(pkt, pktlen, matchedPDR);
 
 MATCHFAILED:
@@ -574,7 +603,7 @@ Status MatchRuleCompile(UPDK_PDR *pdr, MatchRuleNode *matchRule) {
                 char reg_act[] = "(permit)";
                 char reg_direction[] = "(in|out)";
                 char reg_proto[] = "(ip|[0-9]{1,3})";
-                char reg_src_ip_mask[] = "(any|assigned|[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}(/[0-9]{1,2})?)";
+                char reg_src_ip_mask[]  = "(any|assigned|[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}(/[0-9]{1,2})?)";
                 char reg_dest_ip_mask[] = "(any|assigned|[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}(/[0-9]{1,2})?)";
                 char reg_port[] = "([ ][0-9]{1,5}([,-][0-9]{1,5})*)?";
 

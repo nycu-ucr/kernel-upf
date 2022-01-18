@@ -110,6 +110,7 @@ Status SockAddrCopy(SockAddr **dst, const SockAddr **src);
 Status SockAddrSort(SockAddr **sa_list, int family);
 Status SockAddrFillScopeIdInLocal(SockAddr *saList);
 Status SockAddrFreeAll(SockAddr *saList);
+Status FqdnEncode(char *dst, const char *fqdn, unsigned int dstSz);
 int SockAddrLen(const void *sockAddr);
 
 // Utilities

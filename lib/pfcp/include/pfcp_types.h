@@ -155,13 +155,15 @@ typedef struct _PfcpNodeId {
 #define PFCP_NODE_ID_IPV4   0
 #define PFCP_NODE_ID_IPV6   1
 #define PFCP_NODE_ID_FQDN   2
-#define PFPC_NODE_ID_LEN(__nid) 1 + (__nid.type & 2) ? \
-            -1 : ((__nid.type & 1) ? IPV6_LEN : IPV4_LEN)
+#define PFCP_NODE_ID_LEN(__nid) (1 +  \
+            ((__nid.type == PFCP_NODE_ID_FQDN) ? strlen(__nid.fqdn) : \
+            ((__nid.type == PFCP_NODE_ID_IPV6) ? IPV6_LEN : IPV4_LEN)))
     union {
         /* IPV4 */
         struct in_addr      addr4;
         /* IPV6 */
         struct in6_addr     addr6;
+        char                fqdn[256];
     };
 } __attribute__ ((packed)) PfcpNodeId;
 

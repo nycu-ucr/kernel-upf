@@ -15,8 +15,8 @@
 #include "updk/env.h"
 
 Status UpfN4BuildSessionEstablishmentResponse(Bufblk **bufBlk, uint8_t type,
-                                              UpfSession *session, uint8_t cause,
-                                              PFCPSessionEstablishmentRequest *establishRequest) {
+    UpfSession *session, uint8_t cause,
+    PFCPSessionEstablishmentRequest *establishRequest) {
     Status status;
     PfcpMessage pfcpMessage;
     PFCPSessionEstablishmentResponse *response = NULL;
@@ -30,10 +30,9 @@ Status UpfN4BuildSessionEstablishmentResponse(Bufblk **bufBlk, uint8_t type,
     /* Node Id */
     response->nodeID.presence = 1;
     /* TODO: IPv6 */
-    nodeId.type = PFCP_NODE_ID_IPV4;
-    nodeId.addr4 = Self()->pfcpAddr->s4.sin_addr;
+    memcpy(&nodeId, &Self()->pfcpNodeId, sizeof(nodeId));
+    response->nodeID.len = PFCP_NODE_ID_LEN(nodeId);
     response->nodeID.value = &nodeId;
-    response->nodeID.len = 1+4;
 
     /* cause */
     response->cause.presence = 1;
@@ -43,11 +42,12 @@ Status UpfN4BuildSessionEstablishmentResponse(Bufblk **bufBlk, uint8_t type,
     /* Condition or Option */
     if (cause == PFCP_CAUSE_REQUEST_ACCEPTED) {
         /* F-SEID */
+        memset(&fSeid, 0, sizeof(fSeid));
         response->uPFSEID.presence = 1;
         response->uPFSEID.value = &fSeid;
         fSeid.seid = htobe64(session->upfSeid);
         status = PfcpSockaddrToFSeid(Self()->pfcpAddr,
-                                     Self()->pfcpAddr, &fSeid, &len);
+            NULL, &fSeid, &len);
         response->uPFSEID.len = len;
 
         /* FQ-CSID */
@@ -55,16 +55,14 @@ Status UpfN4BuildSessionEstablishmentResponse(Bufblk **bufBlk, uint8_t type,
 
     pfcpMessage.header.type = type;
     status = PfcpBuildMessage(bufBlk, &pfcpMessage);
-    UTLT_Assert(status == STATUS_OK, return STATUS_ERROR,
-                "build msg faild");
+    UTLT_Assert(status == STATUS_OK, return STATUS_ERROR, "BuildSessEst: Failed to build response");
 
-    UTLT_Debug("PFCP session establishment response built!");
+    UTLT_Debug("BuildSessEst: Success to build response!!!");
     return STATUS_OK;
 }
 
 Status UpfN4BuildSessionModificationResponse(Bufblk **bufBlkPtr, uint8_t type,
-                                             UpfSession *session,
-                                             PFCPSessionModificationRequest *modifyRequest) {
+    UpfSession *session, PFCPSessionModificationRequest *modifyRequest) {
     Status status;
     PfcpMessage pfcpMessage;
     PFCPSessionModificationResponse *response = NULL;
@@ -85,15 +83,14 @@ Status UpfN4BuildSessionModificationResponse(Bufblk **bufBlkPtr, uint8_t type,
     pfcpMessage.header.seidP = 1;
     pfcpMessage.header.seid = session->smfSeid;
     status = PfcpBuildMessage(bufBlkPtr, &pfcpMessage);
-    UTLT_Assert(status == STATUS_OK, return STATUS_ERROR, "PFCP build error");
+    UTLT_Assert(status == STATUS_OK, return STATUS_ERROR, "SessionModBuild: Failed to build response");
 
-    UTLT_Debug("PFCP session modification response built!");
+    UTLT_Debug("SessionModBuild: Success to build response");
     return STATUS_OK;
 }
 
 Status UpfN4BuildSessionDeletionResponse(Bufblk **bufBlkPtr, uint8_t type,
-                                         UpfSession *session,
-                                         PFCPSessionDeletionRequest *deletionRequest) {
+    UpfSession *session, PFCPSessionDeletionRequest *deletionRequest) {
     Status status;
     PfcpMessage pfcpMessage;
     PFCPSessionDeletionResponse *response = NULL;
@@ -102,26 +99,25 @@ Status UpfN4BuildSessionDeletionResponse(Bufblk **bufBlkPtr, uint8_t type,
     response = &pfcpMessage.pFCPSessionDeletionResponse;
     memset(&pfcpMessage, 0, sizeof(PfcpMessage));
 
-    /* cause */
     response->cause.presence = 1;
     cause = PFCP_CAUSE_REQUEST_ACCEPTED;
     response->cause.value = &cause;
     response->cause.len = 1;
 
-    /* TODO: Set Offending IE, Load Control Information, Overload Control Information, Usage Report */
+    /* TODO: Set Offending IE, Load Control Information, Overload Control Information, 
+     * Usage Report 
+     * */
 
     pfcpMessage.header.type = type;
     status = PfcpBuildMessage(bufBlkPtr, &pfcpMessage);
-    UTLT_Assert(status == STATUS_OK, return STATUS_ERROR, "PFCP build error");
+    UTLT_Assert(status == STATUS_OK, return STATUS_ERROR, "SessionDel: Failed to build response");
 
-    UTLT_Debug("PFCP session deletion response built!");
+    UTLT_Debug("SessionDel: Success to build response");
     return STATUS_OK;
 }
 
 Status UpfN4BuildSessionReportRequestDownlinkDataReport(Bufblk **bufBlkPtr,
-                                                        uint8_t type,
-                                                        UpfSession *session,
-                                                        uint16_t pdrId) {
+    uint8_t type, UpfSession *session, uint16_t pdrId) {
     Status status;
     PfcpMessage pfcpMessage;
     PFCPSessionReportRequest *request = NULL;
@@ -171,9 +167,9 @@ Status UpfN4BuildSessionReportRequestDownlinkDataReport(Bufblk **bufBlkPtr,
 
     pfcpMessage.header.type = type;
     status = PfcpBuildMessage(bufBlkPtr, &pfcpMessage);
-    UTLT_Assert(status == STATUS_OK, return STATUS_ERROR, "PFCP build error");
+    UTLT_Assert(status == STATUS_OK, return STATUS_ERROR, "SRRBuild: Failed to build response");
 
-    UTLT_Debug("PFCP session report request downlink data report built!");
+    UTLT_Debug("SRRBuild: Success to build response");
     return STATUS_OK;
 }
 
@@ -192,11 +188,12 @@ Status UpfN4BuildAssociationSetupResponse(Bufblk **bufBlkPtr, uint8_t type) {
     // TODO: IPv6
     response->nodeID.presence = 1;
     PfcpNodeId nodeId;
-    nodeId.spare = 0;
-    nodeId.type = PFCP_NODE_ID_IPV4;
-    nodeId.addr4 = Self()->pfcpAddr->s4.sin_addr;
-    response->nodeID.len = 1+4;
+    memcpy(&nodeId, &Self()->pfcpNodeId, sizeof(nodeId));
+    response->nodeID.len = PFCP_NODE_ID_LEN(nodeId);
     response->nodeID.value = &nodeId;
+    UTLT_Debug("nodeID type=%d, len=%d\n", nodeId.type, PFCP_NODE_ID_LEN(nodeId));
+    UTLT_Debug("nodeID addr(4)=%02x %02x %02x %02x\n",
+        nodeId.fqdn[0], nodeId.fqdn[1], nodeId.fqdn[2], nodeId.fqdn[3]);
 
     /* cause */
     cause = PFCP_CAUSE_REQUEST_ACCEPTED;
@@ -271,9 +268,9 @@ Status UpfN4BuildAssociationSetupResponse(Bufblk **bufBlkPtr, uint8_t type) {
     pfcpMessage.header.type = type;
     status = PfcpBuildMessage(bufBlkPtr, &pfcpMessage);
     UTLT_Assert(*bufBlkPtr, , "buff NULL");
-    UTLT_Assert(status == STATUS_OK, return STATUS_ERROR, "PFCP build error");
+    UTLT_Assert(status == STATUS_OK, return STATUS_ERROR, "AssSetupBuild: Failed to build response");
 
-    UTLT_Debug("PFCP association session setup response built!");
+    UTLT_Debug("AssSetupBuild: Success to build response");
     return STATUS_OK;
 }
 
@@ -290,11 +287,10 @@ Status UpfN4BuildAssociationReleaseResponse(Bufblk **bufBlkPtr, uint8_t type) {
 
     /* nodeId */
     response->nodeID.presence = 1;
-    nodeId.type = PFCP_NODE_ID_IPV4;
     // TODO: IPv6 version
-    nodeId.addr4 = Self()->pfcpAddr->s4.sin_addr;
+    memcpy(&nodeId, &Self()->pfcpNodeId, sizeof(nodeId));
+    response->nodeID.len = PFCP_NODE_ID_LEN(nodeId);
     response->nodeID.value = &nodeId;
-    response->nodeID.len = 1+4; // ???
 
     /* cause */
     response->cause.presence = 1;
@@ -304,9 +300,9 @@ Status UpfN4BuildAssociationReleaseResponse(Bufblk **bufBlkPtr, uint8_t type) {
 
     pfcpMessage.header.type = type;
     status = PfcpBuildMessage(bufBlkPtr, &pfcpMessage);
-    UTLT_Assert(status == STATUS_OK, return STATUS_ERROR, "PFCP build error");
+    UTLT_Assert(status == STATUS_OK, return STATUS_ERROR, "AssRelBuild: Failed to build response");
 
-    UTLT_Debug("PFCP association release response built!");
+    UTLT_Debug("AssRelBuild: Success to build response");
     return STATUS_OK;
 }
 
@@ -325,8 +321,8 @@ Status UpfN4BuildHeartbeatResponse(Bufblk **bufBlkPtr, uint8_t type) {
 
     pfcpMessage.header.type = type;
     status = PfcpBuildMessage(bufBlkPtr, &pfcpMessage);
-    UTLT_Assert(status == STATUS_OK, return STATUS_ERROR, "PFCP build error");
+    UTLT_Assert(status == STATUS_OK, return STATUS_ERROR, "HeartBBuild: Failed to build response");
 
-    UTLT_Debug("PFCP heartbeat response built!");
+    UTLT_Debug("HeartBBuild: Success to build response");
     return STATUS_OK;
 }

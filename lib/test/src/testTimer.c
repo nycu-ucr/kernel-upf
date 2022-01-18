@@ -66,7 +66,7 @@ Status TestTimer_1() {
     // UTLT_Assert(id == 0, return STATUS_ERROR, "Timer active list error : need %d, not %d", 0, id);
     
     usleep(40 * 1000);  // Sleep for the specified number of micro-seconds.
-    TimerExpireCheck(&timerList, 0);
+    TimerExpireCheck(&timerList, 0, 100);
 
     id = (TimerBlkID)ListFirst(&timerList.idle);
     UTLT_Assert(id == idArray[0], return STATUS_ERROR, "Timer idle list error : need %d, not %d", idArray[0], id);
@@ -88,7 +88,7 @@ Status TestTimer_1() {
     UTLT_Assert(expireCheck[3] == 0, return STATUS_ERROR, "Expire check [%d] error : need %d, not %d", 3, 0, expireCheck[3]);
     
     usleep(20 * 1000);  // 40 + 20
-    TimerExpireCheck(&timerList, 0);
+    TimerExpireCheck(&timerList, 0, 100);
 
     id = (TimerBlkID)ListFirst(&timerList.idle);
     UTLT_Assert(id == idArray[0], return STATUS_ERROR, "Timer idle list error : need %d, not %d", idArray[0], id);
@@ -110,7 +110,7 @@ Status TestTimer_1() {
     UTLT_Assert(expireCheck[3] == 0, return STATUS_ERROR, "Expire check [%d] error : need %d, not %d", 3, 0, expireCheck[3]);
     
     usleep(20 * 1000);  // 40 + 20 + 20
-    TimerExpireCheck(&timerList, 0);
+    TimerExpireCheck(&timerList, 0, 100);
 
     id = (TimerBlkID)ListFirst(&timerList.idle);
     UTLT_Assert(id == idArray[0], return STATUS_ERROR, "Timer idle list error : need %d, not %d", idArray[0], id);
@@ -134,7 +134,7 @@ Status TestTimer_1() {
     TimerStop(idArray[1]);  // stop period timer idArray[1]
 
     usleep(40 * 1000); // 40 + 20 + 20 + 40
-    TimerExpireCheck(&timerList, 0);
+    TimerExpireCheck(&timerList, 0, 100);
 
     id = (TimerBlkID)ListFirst(&timerList.idle);
     UTLT_Assert(id == idArray[0], return STATUS_ERROR, "Timer idle list error : need %d, not %d", idArray[0], id);
@@ -156,7 +156,7 @@ Status TestTimer_1() {
     UTLT_Assert(expireCheck[3] == 0, return STATUS_ERROR, "Expire check [%d] error : need %d, not %d", 3, 0, expireCheck[3]);
     
     usleep(15 * 1000); // 40 + 20 + 20 + 40 + 15
-    TimerExpireCheck(&timerList, 0);
+    TimerExpireCheck(&timerList, 0, 100);
 
     id = (TimerBlkID)ListFirst(&timerList.idle);
     UTLT_Assert(id == idArray[0], return STATUS_ERROR, "Timer idle list error : need %d, not %d", idArray[0], id);
@@ -178,7 +178,7 @@ Status TestTimer_1() {
     UTLT_Assert(expireCheck[3] == 1, return STATUS_ERROR, "Expire check [%d] error : need %d, not %d", 3, 1, expireCheck[3]);
     
     usleep(20 * 1000); // 40 + 20 + 20 + 40 + 15 + 20
-    TimerExpireCheck(&timerList, 0);
+    TimerExpireCheck(&timerList, 0, 100);
 
     id = (TimerBlkID)ListFirst(&timerList.idle);
     UTLT_Assert(id == idArray[0], return STATUS_ERROR, "Timer idle list error : need %d, not %d", idArray[0], id);

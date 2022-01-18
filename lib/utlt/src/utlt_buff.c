@@ -9,19 +9,19 @@
 #include "utlt_debug.h"
 #include "utlt_pool.h"
 
-#define MAX_NUM_OF_BUFBLK_POOL       256
+#define MAX_NUM_OF_BUFBLK_POOL       2560000
 
-#define MAX_NUM_OF_BUFBLK_POOL_64    128
-#define MAX_NUM_OF_BUFBLK_POOL_128   128
-#define MAX_NUM_OF_BUFBLK_POOL_256   128
-#define MAX_NUM_OF_BUFBLK_POOL_512   64
-#define MAX_NUM_OF_BUFBLK_POOL_1024  64
-#define MAX_NUM_OF_BUFBLK_POOL_2048  32
-#define MAX_NUM_OF_BUFBLK_POOL_4096  32
-#define MAX_NUM_OF_BUFBLK_POOL_8192  16
-#define MAX_NUM_OF_BUFBLK_POOL_16384 8
-#define MAX_NUM_OF_BUFBLK_POOL_32768 8
-#define MAX_NUM_OF_BUFBLK_POOL_65536 4
+#define MAX_NUM_OF_BUFBLK_POOL_64    1280000
+#define MAX_NUM_OF_BUFBLK_POOL_128   1280000
+#define MAX_NUM_OF_BUFBLK_POOL_256   1280000
+#define MAX_NUM_OF_BUFBLK_POOL_512   64000
+#define MAX_NUM_OF_BUFBLK_POOL_1024  64000
+#define MAX_NUM_OF_BUFBLK_POOL_2048  32000
+#define MAX_NUM_OF_BUFBLK_POOL_4096  3200
+#define MAX_NUM_OF_BUFBLK_POOL_8192  1600
+#define MAX_NUM_OF_BUFBLK_POOL_16384 800
+#define MAX_NUM_OF_BUFBLK_POOL_32768 800
+#define MAX_NUM_OF_BUFBLK_POOL_65536 400
 
 #define SIZE_OF_BUF_RESERVED     4
 #define SIZE_OF_BUF_64           64
@@ -181,7 +181,7 @@ void BufblkPoolCheck(const char *showInfo) {
     UTLT_Debug("Memory leak check end");
 }
 
-Bufblk *BufblkAlloc(uint32_t num, uint32_t size) {
+Bufblk * BufblkAlloc(uint32_t num, uint32_t size) {
     Status status;
     Bufblk *bufblk = NULL;
 
@@ -319,7 +319,7 @@ Status BufblkAppend(Bufblk *bufblk, uint32_t num, uint32_t size) {
     return STATUS_OK;
 }
 
-void *UTLT_Malloc(uint32_t size) {
+void * UTLT_Malloc(uint32_t size) {
     Bufblk tmpBufblk;
     uint32_t realSize = size + sizeof(uint32_t);
     UTLT_Assert(BufAlloc(&tmpBufblk, 1, realSize) == STATUS_OK,
@@ -330,7 +330,7 @@ void *UTLT_Malloc(uint32_t size) {
     return tmpBufblk.buf + sizeof(uint32_t);
 }
 
-void *UTLT_Calloc(uint32_t num, uint32_t size) {
+void * UTLT_Calloc(uint32_t num, uint32_t size) {
     Bufblk tmpBufblk;
     uint32_t realSize = num * size + sizeof(uint32_t);
     UTLT_Assert(BufAlloc(&tmpBufblk, 1, realSize) == STATUS_OK,

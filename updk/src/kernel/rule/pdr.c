@@ -52,20 +52,30 @@ Status _pushPdrToKernel(struct gtp5g_pdr *pdr, int action) {
     if (gtp5g_pdr_get_precedence(pdr)) {
         UTLT_Debug("gtp5g get precendence: %u", ntohl(*gtp5g_pdr_get_precedence(pdr)));
     }
+
     if (gtp5g_pdr_get_far_id(pdr)) {
         UTLT_Debug("gtp5g get farId: %u", ntohl(*gtp5g_pdr_get_far_id(pdr)));
     }
+
+	/* TODO: Support multiple QERs */
+    if (gtp5g_pdr_get_qer_id(pdr)) {
+        UTLT_Debug("gtp5g get qerId: %u", ntohl(*gtp5g_pdr_get_qer_id(pdr)));
+    }
+
     if (gtp5g_pdr_get_outer_header_removal(pdr)) {
         UTLT_Debug("gtp5g get outer header removal: %u",
                    *gtp5g_pdr_get_outer_header_removal(pdr));
     }
+
     if (gtp5g_pdr_get_ue_addr_ipv4(pdr)) {
         _addr4ToStr(gtp5g_pdr_get_ue_addr_ipv4(pdr), ipStr);
         UTLT_Debug("gtp5g get ue ip: %s", ipStr);
     }
+
     if (gtp5g_pdr_get_local_f_teid_teid(pdr)) {
         UTLT_Debug("gtp5g get teid: %u", ntohl(*gtp5g_pdr_get_local_f_teid_teid(pdr)));
     }
+
     if (gtp5g_pdr_get_local_f_teid_gtpu_addr_ipv4(pdr)) {
         _addr4ToStr(gtp5g_pdr_get_local_f_teid_gtpu_addr_ipv4(pdr), ipStr);
         UTLT_Debug("gtp5g get gtpu ip: %s", ipStr);
@@ -208,7 +218,7 @@ int _SetGtp5gPdr(UpfPdr *upfPdr, UPDK_PDR *pdr) {
     }
 
     if (pdr->flags.qerId) {
-        // TODO:
+        // Current implementation supports only one QER
         gtp5g_pdr_set_qer_id(upfPdr, pdr->qerId[0]);
         UTLT_Debug("gtp5g set PDR QER ID: %u", pdr->qerId[0]);
     }

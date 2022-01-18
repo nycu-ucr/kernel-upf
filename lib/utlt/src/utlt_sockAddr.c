@@ -243,3 +243,34 @@ Status SockAddrFreeAll(SockAddr *saList) {
 
     return STATUS_OK;
 }
+
+/* Assuming the fqdn parameter is a valid FQDN
+ */
+Status FqdnEncode(char *dst, const char *fqdn, unsigned int dstSz) {
+    char *dstBound = dst + dstSz;
+    const char *cur = fqdn;
+    char *pNrNotDot = dst;
+    char nrNonDot = 0;
+
+    dst++;
+    while(dst < dstBound) {
+        while(*cur && *cur != '.' && dst < dstBound) {
+            nrNonDot++;
+            *dst++ = *cur++;
+        }
+        if (!cur)
+        {
+            *dst = 0;
+            break;
+        }
+        else
+        {
+            cur++;
+            *pNrNotDot = nrNonDot;
+            pNrNotDot = dst++;
+            nrNonDot = 0;
+        }
+    }
+
+    return STATUS_OK;
+}

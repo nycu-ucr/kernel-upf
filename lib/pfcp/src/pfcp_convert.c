@@ -10,8 +10,7 @@
 
 #include "pfcp_convert.h"
 
-Status PfcpFSeidToSockaddr(
-PfcpFSeid *fSeid, uint16_t port, SockAddr **list) {
+Status PfcpFSeidToSockaddr(PfcpFSeid *fSeid, uint16_t port, SockAddr **list) {
     SockAddr *addr = NULL, *addr6 = NULL;
 
     UTLT_Assert(fSeid, return STATUS_ERROR, "fSeid null");
@@ -23,26 +22,22 @@ PfcpFSeid *fSeid, uint16_t port, SockAddr **list) {
     addr->_port = htons(port);
 
     addr6 = UTLT_Calloc(1, sizeof(SockAddr));
-    UTLT_Assert(addr6, return STATUS_ERROR, "addr6 null");
+    UTLT_Assert(addr6, goto err, "addr6 null");
     addr6->_family = AF_INET6;
     addr6->_port = htons(port);
 
     if (fSeid->v4 && fSeid->v6) {
         addr->next = addr6;
-
         addr->s4.sin_addr = fSeid->dualStack.addr4;
         addr6->s6.sin6_addr = fSeid->dualStack.addr6;
-
         *list = addr;
     } else if (fSeid->v4) {
         addr->s4.sin_addr = fSeid->addr4;
         UTLT_Free(addr6);
-
         *list = addr;
     } else if (fSeid->v6) {
         addr6->s6.sin6_addr = fSeid->addr6;
         UTLT_Free(addr);
-
         *list = addr6;
     } else {
         UTLT_Free(addr);
@@ -51,11 +46,14 @@ PfcpFSeid *fSeid, uint16_t port, SockAddr **list) {
     }
 
     return STATUS_OK;
+
+err:
+    UTLT_Free(addr);
+    return STATUS_ERROR;
 }
 
-Status PfcpSockaddrToFSeid(
-    SockAddr *addr, SockAddr *addr6, PfcpFSeid *fSeid, int *len) {
-    UTLT_Assert(fSeid, return STATUS_ERROR, "fSeid error when convert socket to f-SEID");
+Status PfcpSockaddrToFSeid(SockAddr *addr, SockAddr *addr6, PfcpFSeid *fSeid, int *len) {
+    UTLT_Assert(fSeid, return STATUS_ERROR, "FillfSeid: error when convert socket to f-SEID");
 
     if (addr && addr6) {
         fSeid->v4 = 1;
@@ -74,15 +72,15 @@ Status PfcpSockaddrToFSeid(
         fSeid->addr6 = addr6->s6.sin6_addr;
         *len = PFCP_F_SEID_IPV6_LEN;
     } else {
-        UTLT_Assert(0, return STATUS_ERROR, "socket neither IPv4 nor IPv6");
+        UTLT_Assert(0, return STATUS_ERROR, "FillfSeid: socket neither IPv4 nor IPv6");
     }
 
     return STATUS_OK;
 }
 
 Status PfcpFSeidToIp(PfcpFSeid *fSeid, Ip *ip) {
-    UTLT_Assert(ip, return STATUS_ERROR, "f-SEID to IP IP error");
-    UTLT_Assert(fSeid, return STATUS_ERROR, "f-SEID to IP f-SEID error");
+    UTLT_Assert(ip, return STATUS_ERROR, "FSeidToIP: IP is NULL");
+    UTLT_Assert(fSeid, return STATUS_ERROR, "FSeidToIP: PfcpFSeid is NULL");
 
     memset(ip, 0, sizeof(Ip));
 
@@ -96,11 +94,12 @@ Status PfcpFSeidToIp(PfcpFSeid *fSeid, Ip *ip) {
     } else if (ip->ipv4) {
         ip->addr4 = fSeid->addr4;
         ip->len = IPV4_LEN;
+        UTLT_Info("FSeidToIP: PFCP Node IPv4: %#08x",  ip->addr4);
     } else if (ip->ipv6) {
         ip->addr6 = fSeid->addr6;
         ip->len = IPV6_LEN;
     } else {
-        UTLT_Assert(0, return STATUS_ERROR, "f-SEID neither IPv4 nor IPv6");
+        UTLT_Assert(0, return STATUS_ERROR, "FSeidToIP: neither IPv4 nor IPv6");
     }
 
     return STATUS_OK;
@@ -204,8 +203,7 @@ Status PfcpOuterHdrToIp(PfcpOuterHdr *outerHdr, Ip *ip) {
     return STATUS_OK;
 }
 
-Status PfcpSockaddrToFTeid(
-    SockAddr *addr, SockAddr *addr6, PfcpFTeid *fTeid, int *len) {
+Status PfcpSockaddrToFTeid(SockAddr *addr, SockAddr *addr6, PfcpFTeid *fTeid, int *len) {
     UTLT_Assert(fTeid, return STATUS_ERROR, "Socket to F-TEID F-TEID error");
 
     if (addr && addr6) {

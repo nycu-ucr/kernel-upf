@@ -29,45 +29,48 @@ Status PfcpNodeTerminate() {
     return STATUS_OK;
 }
 
-Status PfcpAddNode(ListHead *list, PfcpNode **node,
-                   const SockAddr *allList, _Bool noIpv4,
-                   _Bool noIpv6, _Bool preferIpv4) {
+static Status PfcpAddNode(ListHead *list, PfcpNode **node,
+    const SockAddr *allList, _Bool noIpv4,
+    _Bool noIpv6, _Bool preferIpv4) {
     Status status;
     PfcpNode *newNode = NULL;
     SockAddr *preferredList = NULL;
 
-    UTLT_Assert(list, return STATUS_ERROR, "ListHead error");
-    UTLT_Assert(allList, return STATUS_ERROR, "list of socket error");
+    UTLT_Assert(list, return STATUS_ERROR, "AddNode: ListHead error");
+    UTLT_Assert(allList, return STATUS_ERROR, "AddNode: list of socket error");
 
     status = SockAddrCopy(&preferredList, &allList);
-    UTLT_Assert(status == STATUS_OK, return STATUS_ERROR, "socket copy failed");
+    UTLT_Assert(status == STATUS_OK, return STATUS_ERROR, "AddNode: socket addr copy failed");
 
     if (noIpv4) {
         status = SockAddrFilter(&preferredList, AF_INET6);
-        UTLT_Assert(status == STATUS_OK, return STATUS_ERROR, "no IPv4 error");
+        UTLT_Assert(status == STATUS_OK, return STATUS_ERROR, "AddNode: no IPv4 error");
     }
+
     if (noIpv6) {
         status = SockAddrFilter(&preferredList, AF_INET);
-        UTLT_Assert(status == STATUS_OK, return STATUS_ERROR, "no IPv6 error");
+        UTLT_Assert(status == STATUS_OK, return STATUS_ERROR, "AddNode: no IPv6 error");
     }
+
     if (preferIpv4) {
         status = SockAddrSort(&preferredList, AF_INET);
-        UTLT_Assert(status == STATUS_OK, return STATUS_ERROR, "Socket sort error");
+        UTLT_Assert(status == STATUS_OK, return STATUS_ERROR, "AddNode: Socket IPv4 sort error");
     } else {
         status = SockAddrSort(&preferredList, AF_INET6);
-        UTLT_Assert(status == STATUS_OK, return STATUS_ERROR, "Socket sort error");
+        UTLT_Assert(status == STATUS_OK, return STATUS_ERROR, "AddNode: Socket IPv6 sort error");
     }
 
     if (preferredList) {
         PoolAlloc(&pfcpNodePool, newNode);
-        UTLT_Assert(newNode, return STATUS_ERROR, "node allocate error");
+        UTLT_Assert(newNode, return STATUS_ERROR, "AddNode: Failed to allocate");
+
         memset(newNode, 0, sizeof(PfcpNode));
 
         newNode->saList = preferredList;
 
         ListHeadInit(&newNode->node);
         ListHeadInit(&newNode->localList);
-        ListHeadInit(&newNode->remoteList);
+        ListHeadInit(&newNode->remoteXactList);
 
         newNode->timeHeartbeat = 0;
 
@@ -76,35 +79,39 @@ Status PfcpAddNode(ListHead *list, PfcpNode **node,
     }
 
     *node = newNode;
-
     return STATUS_OK;
 }
 
-PfcpNode *PfcpAddNodeWithSeid(ListHead *list, PfcpFSeid *fSeid,
-        uint16_t port, _Bool noIpv4, _Bool noIpv6, _Bool preferIpv4) {
+PfcpNode * PfcpAddNodeWithSock(ListHead *list, SockAddr *from) {
     Status status;
     PfcpNode *node = NULL;
     SockAddr *saList = NULL;
 
-    UTLT_Assert(list, return NULL, "list error");
-    UTLT_Assert(fSeid, return NULL, "F-SEID error");
-    UTLT_Assert(port, return NULL, "port error");
+    //FIXME: copy from _pfcpReceiveCB() n4_pfcp_path.c, as a temp solution.
+    //TODO:  doon't use the term "fSeid", as it is not.
+    PfcpFSeid fSeid;
 
-    status = PfcpFSeidToSockaddr(fSeid, port, &saList);
-    UTLT_Assert(status == STATUS_OK, return NULL, "F-SEID to Sock error");
+    UTLT_Assert(list, return NULL, "AddNodeSEID: NULL list");
+    UTLT_Assert(from, return NULL, "AddNodeSEID: NULL from");
 
-    status = PfcpAddNode(list, &node, saList, noIpv4, noIpv6, preferIpv4);
-    UTLT_Assert(status == STATUS_OK, goto err1, "PFCP add to list error");
-    UTLT_Assert(node, goto err1, "node can't be allocate");
+    memset(&fSeid, 0, sizeof(fSeid));
+    fSeid.v4 = 1;
+    fSeid.addr4 = from->s4.sin_addr;
 
-    status = PfcpFSeidToIp(fSeid, &node->ip);
-    UTLT_Assert(status == STATUS_OK, goto err2, "F-SEID to IP error");
+    status = PfcpFSeidToSockaddr(&fSeid, PFCP_UDP_PORT, &saList);
+    UTLT_Assert(status == STATUS_OK, return NULL, "AddNodeSEID: F-SEID to Sock error");
+
+    status = PfcpAddNode(list, &node, saList, 0, 1, 0);
+    UTLT_Assert(status == STATUS_OK, goto err1, "AddNodeSEID: PFCP add to list error");
+    UTLT_Assert(node, goto err1, "AddNodeSEID: Node can't be allocate");
+
+    status = PfcpFSeidToIp(&fSeid, &node->ip);
+    UTLT_Assert(status == STATUS_OK, goto err2, "AddNodeSEID: F-SEID to IP error");
 
     status = SockAddrFillScopeIdInLocal(node->saList);
-    UTLT_Assert(status == STATUS_OK, goto err2, "Get local address error");
+    UTLT_Assert(status == STATUS_OK, goto err2, "AddNodeSEID: Get local address error");
 
     SockAddrFreeAll(saList);
-
     return node;
 
 err2:
@@ -115,7 +122,7 @@ err1:
 }
 
 Status PfcpRemoveNode(ListHead *list, PfcpNode *node) {
-    UTLT_Assert(node, return STATUS_ERROR, "pfcp node error");
+    UTLT_Assert(node, return STATUS_ERROR, "RemoveNode: node NULL");
 
     PfcpNode *it, *nextIt = NULL;
     
@@ -164,7 +171,7 @@ PfcpNode *PfcpFindNode(ListHead *list, PfcpFSeid *fSeid) {
     }
     
     ListForEachSafe(current, nextNode, list) { 
-        if(!memcmp(&ip, &(current->ip), ip.len)) {
+        if (!memcmp(&ip, &(current->ip), ip.len)) {
             break;
         }
     }
@@ -215,7 +222,7 @@ PfcpNode *PfcpFindNodeSockAddr(ListHead *list, SockAddr *sock) {
     ListForEachSafe(current, nextNode, list) {
         SockAddr *addr;
         for (addr = current->saList; addr; addr = addr->next) {
-            if(!SockCmp(addr, sock)) {
+            if (!SockCmp(addr, sock)) {
                 hitSame = 1;
                 break;
             }

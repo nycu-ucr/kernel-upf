@@ -8,12 +8,13 @@ extern "C" {
 #include <string.h>
 
 typedef int Status;
-#define STATUS_ERROR -1
-#define STATUS_OK 0
-#define STATUS_EAGAIN 1
+#define STATUS_ERROR    -1
+#define STATUS_OK       0
+#define STATUS_EAGAIN   1
 
 Status UTLT_SetLogLevel(const char *level);
 Status UTLT_SetReportCaller(unsigned int reportCaller);
+Status UTIL_LogFileHook(const char *nfPath, const char *free5gcPath);
 
 const char *UTLT_StrStatus(Status status);
 

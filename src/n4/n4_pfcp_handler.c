@@ -19,6 +19,82 @@
 #include "updk/rule_far.h"
 #include "updk/rule_qer.h"
 
+#define REQUEST_HANDLE      0x0001
+#define REQUEST_RESPONSE    0x0002
+#define REQUEST_DROP        0x0004
+
+static uint16_t ValidateUpfSessionState(UpfSession *sess, uint8_t type, uint32_t sqn) 
+{ 
+    uint16_t status = REQUEST_HANDLE;
+    SessionReqState *reqState;
+    int stateIndex;
+
+    ConvertReqTypeToStateIndex(type, stateIndex);
+    
+    if (stateIndex > PFCP_MAX_REQ_STATE) {
+        UTLT_Error("ValUpfSessState: request type: %u index error", type);
+        return status;
+    }
+
+    reqState = &sess->reqState[stateIndex];
+    switch (reqState->state) {
+    case SMF_UPF_SESSION_STATE_INIT:    /* New Request */
+        reqState->sqn = sqn;
+        status = REQUEST_HANDLE;
+        break;
+    case SMF_UPF_SESSION_STATE_HANDLE: /* Outstanding request exists, and in-progress */
+        if (reqState->sqn != sqn) {
+            UTLT_Warning("ValUpfSessState: Type: %u Sqn O: %u N: %u", type,
+                reqState->sqn, sqn);
+            /* TODO: necessary action when existing sequence number is different
+             * with given value
+             * */
+        }
+        
+        if (reqState->subState != SMF_UPF_SESSION_SUB_STATE_HANDLE_SUCCESS)
+            status = REQUEST_HANDLE;
+        else 
+            status = REQUEST_DROP;
+        break;
+    case SMF_UPF_SESSION_STATE_SEND_RSP:
+        status = REQUEST_RESPONSE;
+        break;
+    case SMF_UPF_SESSION_STATE_DELETED: 
+    case SMF_UPF_SESSION_STATE_RELEASE:
+    case SMF_UPF_SESSION_STATE_ERROR:
+    default:
+        status = REQUEST_HANDLE;
+        break;
+    }       
+    return status;
+}
+
+static uint32_t GetPfcpRequestSqn(PfcpHeader *header) 
+{
+    if (header->seidP) {
+        return be32toh(header->sqn);
+    } 
+    
+    return be32toh(header->sqn_only);
+}
+
+void UpdateUpfSessionState(UpfSession *sess, uint8_t type, 
+    uint16_t state, uint16_t substate) {
+    SessionReqState *reqState;
+    int stateIndex;
+
+    ConvertReqTypeToStateIndex(type, stateIndex);
+    
+    if (stateIndex > PFCP_MAX_REQ_STATE) {
+        UTLT_Error("UpdUpfSessState: request type: %u map index error", type);
+        return;
+    }
+    
+    reqState = &sess->reqState[stateIndex];
+    reqState->state = state;
+    reqState->subState = substate;
+}
+
 /*
  * Note: When apply a IE from PDR or FAR, you should check all
  * "_Convert*TlvToRule" if they need to be modified.
@@ -44,7 +120,7 @@ Status _ConvertCreatePDRTlvToRule(UpfPDR *upfPdr, CreatePDR *createPdr) {
     if (createPdr->precedence.presence) {
         upfPdr->flags.precedence = 1;
         upfPdr->precedence = ntohl(*((uint32_t *)createPdr->precedence.value));
-        UTLT_Debug("PDR ID: %u", upfPdr->precedence);
+        UTLT_Debug("PDR Precedence: %u", upfPdr->precedence);
     }
 
     if (createPdr->pDI.presence) {
@@ -202,11 +278,12 @@ Status _ConvertCreatePDRTlvToRule(UpfPDR *upfPdr, CreatePDR *createPdr) {
         UTLT_Warning("UPF do NOT support URR yet");
     }
 
+	//TODO: Support Multiple QERs, currently 4QERs only
     for (int i = 0; i < sizeof(createPdr->qERID) / sizeof(QERID); i++) {
         if (createPdr->qERID[i].presence) {
             upfPdr->flags.qerId = 1;
             upfPdr->qerId[i] = ntohl(*((uint32_t *)createPdr->qERID[i].value));
-            UTLT_Debug("PDR QER ID: %u", upfPdr->qerId[i]);
+            UTLT_Trace("PDR QER ID: %u", upfPdr->qerId[i]);
         }
     }
 
@@ -678,7 +755,7 @@ Status _ConvertUpdatePDRTlvToRule(UpfPDR *upfPdr, UpdatePDR *updatePDR) {
         if (updatePDR->qERID[i].presence) {
             upfPdr->flags.qerId = 1;
             upfPdr->qerId[i] = ntohl(*((uint32_t *)updatePDR->qERID[i].value));
-            UTLT_Debug("PDR QER ID: %u", upfPdr->qerId[i]);
+            UTLT_Trace("PDR QER ID: %u", upfPdr->qerId[i]);
         }
     }
 
@@ -866,6 +943,25 @@ Status UpfN4HandleUpdateFar(UpfSession *session, UpdateFAR *updateFar) {
         }
     }
 
+    // Validate the SRR state machine's state and release the resource of SRR
+    if (oldAction & PFCP_FAR_APPLY_ACTION_NOCP && !(upfFar.applyAction & PFCP_FAR_APPLY_ACTION_NOCP)) {
+        UpfPDRNode *node, *nextNode = NULL;
+        uint16_t pdr_id = 0;
+        
+        ListForEachSafe(node, nextNode, &session->pdrList) {
+            if (node->pdr.farId == upfFar.farId) {
+                pdr_id = node->pdr.pdrId; 
+                break;
+            }
+        }
+        if (pdr_id) {
+            UpfSRRNode *srr = UpfSrrFindByPdrId(session, pdr_id);
+            if (srr) {
+               UpfSrrRemoveNode(srr); 
+            }
+        }
+    }
+
     return STATUS_OK;
 }
 
@@ -1029,6 +1125,12 @@ Status UpfN4HandleRemovePdr(UpfSession *session, uint16_t nPDRID) {
     if (packetStorage)
         UpfBufPacketRemove(packetStorage);
 
+    UpfSRRNode *srr = UpfSrrFindByPdrId(session, pdrID);
+    if (srr != NULL) {
+        //Don't change the state of SRR
+        UpfSrrRemoveNode(srr);
+    }
+
     // Deregister PDR to Session
     UTLT_Assert(UpfPDRDeregisterToSessionByID(session, upfPdr.pdrId) == STATUS_OK,
         return STATUS_ERROR, "UpfPDRDeregisterToSessionByID failed");
@@ -1104,92 +1206,131 @@ Status UpfN4HandleRemoveQer(UpfSession *session, uint32_t nQERID) {
     return STATUS_OK;
 }
 
+/* TODO: PFCP Session Establishment Request may have one or more PDRs, 
+ * FARs, QERs, ...
+ * Current implmentation supports only FOUR PDRs, FARs, and QERs
+ * 
+ *	The order of PDRs, FARs, and QERs like below (sample flow)
+ *		1) FARs  	(order MAY change)
+ *		2) QERs		(order MAY change)
+ *		3) PDRs 	(Final SHOULD NOT change)
+ */
 Status UpfN4HandleSessionEstablishmentRequest(UpfSession *session, PfcpXact *pfcpXact,
-                                              PFCPSessionEstablishmentRequest *request) {
+    PfcpHeader *reqHdr, PFCPSessionEstablishmentRequest *request) {
     Status status;
     uint8_t cause = PFCP_CAUSE_REQUEST_ACCEPTED;
+    PfcpHeader header;
+    Bufblk *bufBlk = NULL;
+    uint32_t sqn;
+    uint16_t state;
 
-    UTLT_Assert(session, return STATUS_ERROR, "Upf Session error");
-    UTLT_Assert(pfcpXact, return STATUS_ERROR, "pfcpXact error");
-    //UTLT_Assert(pfcpXact->gtpBuf, return,
-    //  "GTP buffer of pfcpXact error");
-    //UTLT_Assert(pfcpXact->gtpXact, return,
-    // "GTP Xact of pfcpXact error");
+    UTLT_Assert(session, return STATUS_ERROR, "SessEstReq: session NULL");
+    UTLT_Assert(pfcpXact, return STATUS_ERROR, "SessEstReq: Xact NULL");
 
+    sqn = GetPfcpRequestSqn(reqHdr);    
+    state = ValidateUpfSessionState(session, 
+        PFCP_SESSION_ESTABLISHMENT_REQUEST, 
+        sqn);
+    if (state == REQUEST_DROP) {
+        goto out;
+    } else if (state == REQUEST_RESPONSE) {
+        /* TODO: Validate the received packet with existing values of PDR, FAR, QER */
+        goto send_rsp;
+    }
+    
     for (int i = 0; i < sizeof(request->createFAR) / sizeof(CreateFAR); i++) {
         if (request->createFAR[i].presence) {
             status = UpfN4HandleCreateFar(session, &request->createFAR[i]);
             // TODO: if error, which cause, and pull out the rule from kernel that
             // has been set, maybe need to pull out session as well
             UTLT_Assert(status == STATUS_OK, cause = PFCP_CAUSE_REQUEST_REJECTED,
-                        "Create FAR error");
+                "SessEstReq: Create FAR error ST: %d", status);
         }
     }
 
+	/* QER: TODO, Currently we support 4QER's per request, and also 
+     * we send only one QER info to gtp5g
+     * */
     for (int i = 0; i < sizeof(request->createQER) / sizeof(CreateQER); i++) {
         if (request->createQER[i].presence) {
             status = UpfN4HandleCreateQer(session, &request->createQER[i]);
             // TODO: if error, which cause, and pull out the rule from kernel that
             // has been set, maybe need to pull out session as well
             UTLT_Assert(status == STATUS_OK, cause = PFCP_CAUSE_REQUEST_REJECTED,
-                        "Create QER error");
+                "SessEstReq: Create QER error ST: %d", status);
         }
     }
 
     if (request->createURR.presence) {
         // TODO
-    }
-    if (request->createBAR.presence) {
-        // TODO
+        UTLT_Warning("SessEstReq:: CreateURR unhandled");
     }
 
-    // The order of PDF should be the lastest
+    if (request->createBAR.presence) {
+        // TODO
+        UTLT_Warning("SessEstReq:: CreateBAR unhandled");
+    }
+
+    // The order of PDR should be the lastest one
     for (int i = 0; i < sizeof(request->createPDR) / sizeof(CreatePDR); i++) {
         if (request->createPDR[i].presence) {
             status = UpfN4HandleCreatePdr(session, &request->createPDR[i]);
             UTLT_Assert(status == STATUS_OK, cause = PFCP_CAUSE_REQUEST_REJECTED,
-                        "Create PDR Error");
+                "SessEstReq: Create PDR error ST: %d", status);
         }
     }
 
-    PfcpHeader header;
-    Bufblk *bufBlk = NULL;
-    PfcpFSeid *smfFSeid = NULL;
-
     if (!request->cPFSEID.presence) {
-        UTLT_Error("Session Establishment Response: No CP F-SEID");
+        UTLT_Error("SessEstReq:: No CP F-SEID");
         cause = PFCP_CAUSE_MANDATORY_IE_MISSING;
     }
 
-    smfFSeid = request->cPFSEID.value;
-    session->smfSeid = be64toh(smfFSeid->seid);
+    UpdateUpfSessionState(session, 
+        PFCP_SESSION_ESTABLISHMENT_REQUEST, 
+        SMF_UPF_SESSION_STATE_HANDLE, 
+        SMF_UPF_SESSION_SUB_STATE_HANDLE_SUCCESS);
 
+send_rsp:
     /* Send Response */
     memset(&header, 0, sizeof(PfcpHeader));
     header.type = PFCP_SESSION_ESTABLISHMENT_RESPONSE;
     header.seid = session->smfSeid;
 
-    status = UpfN4BuildSessionEstablishmentResponse(&bufBlk, header.type,
-                                                    session, cause, request);
+    status = UpfN4BuildSessionEstablishmentResponse(&bufBlk, 
+        header.type,
+        session, 
+        cause, 
+        request);
     UTLT_Assert(status == STATUS_OK, return STATUS_ERROR,
-                "N4 build error");
+        "SessEstReq: N4 build  ST: %d", status);
 
     status = PfcpXactUpdateTx(pfcpXact, &header, bufBlk);
-    UTLT_Assert(status == STATUS_OK, BufblkFree(bufBlk); return STATUS_ERROR,
-                "pfcpXact update TX error");
+    UTLT_Assert(status == STATUS_OK, return STATUS_ERROR,
+        "SessEstReq: pfcpXact update TX  ST: %d", status);
 
     status = PfcpXactCommit(pfcpXact);
-    UTLT_Assert(status == STATUS_OK, return STATUS_ERROR,
-                "xact commit error");
+    if (status != STATUS_OK) {
+        UpdateUpfSessionState(session, 
+            PFCP_SESSION_ESTABLISHMENT_REQUEST, 
+            SMF_UPF_SESSION_STATE_SEND_RSP, 
+            SMF_UPF_SESSION_SUB_STATE_SEND_RSP_FAILURE);
+        UTLT_Error("SessEstReq: Failed to xact commit error ST: %d", status);
+    }
 
-    UTLT_Info("[PFCP] Session Establishment Response");
+    UpdateUpfSessionState(session, 
+        PFCP_SESSION_ESTABLISHMENT_REQUEST, 
+        SMF_UPF_SESSION_STATE_SEND_RSP, 
+        SMF_UPF_SESSION_SUB_STATE_SEND_RSP_SUCCESS);
+
+    UTLT_Debug("SessEstReq: Session Establishment Request done");
+out:
     return STATUS_OK;
 }
 
 Status UpfN4HandleSessionModificationRequest(UpfSession *session, PfcpXact *xact,
-                                             PFCPSessionModificationRequest *request) {
-    UTLT_Assert(session, return STATUS_ERROR, "Session error");
-    UTLT_Assert(xact, return STATUS_ERROR, "xact error");
+    PFCPSessionModificationRequest *request) {
+    UTLT_Assert(session, return STATUS_ERROR, "SessMod: Session NULL");
+    UTLT_Assert(xact, return STATUS_ERROR, "SessMod: xact NULL");
 
     Status status;
     PfcpHeader header;
@@ -1200,7 +1341,7 @@ Status UpfN4HandleSessionModificationRequest(UpfSession *session, PfcpXact *xact
         if (request->createFAR[i].presence) {
             status = UpfN4HandleCreateFar(session, &request->createFAR[i]);
             UTLT_Assert(status == STATUS_OK, return STATUS_ERROR,
-                        "Modification: Create FAR error");
+                "SessMod: Create FAR error ST: %d", status);
         }
     }
 
@@ -1209,7 +1350,7 @@ Status UpfN4HandleSessionModificationRequest(UpfSession *session, PfcpXact *xact
         if (request->createQER[i].presence) {
             status = UpfN4HandleCreateQer(session, &request->createQER[i]);
             UTLT_Assert(status == STATUS_OK, return STATUS_ERROR,
-                        "Modification: Create QER error");
+                "SessMod: Create QER error ST: %d", status);
         }
     }
 
@@ -1219,7 +1360,7 @@ Status UpfN4HandleSessionModificationRequest(UpfSession *session, PfcpXact *xact
         if (request->createPDR[i].presence) {
             status = UpfN4HandleCreatePdr(session, &request->createPDR[i]);
             UTLT_Assert(status == STATUS_OK, return STATUS_ERROR,
-                        "Modification: Create PDR error");
+                "SessMod: Create PDR error ST: %d", status);
         }
     }
 
@@ -1227,10 +1368,10 @@ Status UpfN4HandleSessionModificationRequest(UpfSession *session, PfcpXact *xact
     for (int i = 0; i < sizeof(request->updateFAR) / sizeof(UpdateFAR); i++) {
         if (request->updateFAR[i].presence) {
             UTLT_Assert(request->updateFAR[i].fARID.presence == 1, ,
-                        "[PFCP] FarId in updateFAR not presence");
+                "SessMod: UpdateFAR farID not presence");
             status = UpfN4HandleUpdateFar(session, &request->updateFAR[i]);
             UTLT_Assert(status == STATUS_OK, return STATUS_ERROR,
-                        "Modification: Update FAR error");
+                "SessMod: Update FAR error ST: %d", status);
         }
     }
 
@@ -1238,10 +1379,10 @@ Status UpfN4HandleSessionModificationRequest(UpfSession *session, PfcpXact *xact
     for (int i = 0; i < sizeof(request->updateQER) / sizeof(UpdateQER); i++) {
         if (request->updateQER[i].presence) {
             UTLT_Assert(request->updateQER[i].qERID.presence == 1, ,
-                        "[PFCP] QerId in updateQER not presence");
+                "SessMod: UpdateQER QerId not presence");
             status = UpfN4HandleUpdateQer(session, &request->updateQER[i]);
             UTLT_Assert(status == STATUS_OK, return STATUS_ERROR,
-                        "Modification: Update QER error");
+                "SessMod:: UpdateQER error ST: %d", status);
         }
     }
 
@@ -1250,10 +1391,10 @@ Status UpfN4HandleSessionModificationRequest(UpfSession *session, PfcpXact *xact
     for (int i = 0; i < sizeof(request->updatePDR) / sizeof(UpdatePDR); i++) {
         if (request->updatePDR[i].presence) {
             UTLT_Assert(request->updatePDR[i].pDRID.presence == 1, ,
-                        "[PFCP] PdrId in updatePDR not presence!");
+                "SessMod: UpdatePDR PdrID not presence");
             status = UpfN4HandleUpdatePdr(session, &request->updatePDR[i]);
             UTLT_Assert(status == STATUS_OK, return STATUS_ERROR,
-                        "Modification: Update PDR error");
+                "SessMod:: UpdatePDR error ST: %d", status);
         }
     }
 
@@ -1261,11 +1402,11 @@ Status UpfN4HandleSessionModificationRequest(UpfSession *session, PfcpXact *xact
     for (int i = 0; i < sizeof(request->removeFAR) / sizeof(RemoveFAR); i++) {
         if (request->removeFAR[i].presence) {
             UTLT_Assert(request->removeFAR[i].fARID.presence == 1, ,
-                        "[PFCP] FarId in removeFAR not presence");
-            status = UpfN4HandleRemoveFar(session, *(uint32_t*)
-                                        request->removeFAR[i].fARID.value);
+                "SessMod: RemoveFAR farID not presence");
+            status = UpfN4HandleRemoveFar(session, 
+                *(uint32_t *) request->removeFAR[i].fARID.value);
             UTLT_Assert(status == STATUS_OK, return STATUS_ERROR,
-                        "Modification: Remove FAR error");
+                "SessMod: RemoveFAR error ST: %d", status);
         }
     }
 
@@ -1273,11 +1414,11 @@ Status UpfN4HandleSessionModificationRequest(UpfSession *session, PfcpXact *xact
     for (int i = 0; i < sizeof(request->removeQER) / sizeof(RemoveQER); i++) {
         if (request->removeQER[i].presence) {
             UTLT_Assert(request->removeQER[i].qERID.presence == 1, ,
-                        "[PFCP] QerId in removeQER not presence");
-            status = UpfN4HandleRemoveQer(session, *(uint32_t*)
-                                        request->removeQER[i].qERID.value);
+                "SessMod: RemoveQER QerId not presence");
+            status = UpfN4HandleRemoveQer(session, 
+                *(uint32_t *) request->removeQER[i].qERID.value);
             UTLT_Assert(status == STATUS_OK, return STATUS_ERROR,
-                        "Modification: Remove QER error");
+                "SessMod: RemoveQER error ST: %d", status);
         }
     }
 
@@ -1286,11 +1427,11 @@ Status UpfN4HandleSessionModificationRequest(UpfSession *session, PfcpXact *xact
     for (int i = 0; i < sizeof(request->removePDR) / sizeof(RemovePDR); i++) {
         if (request->removePDR[i].presence) {
             UTLT_Assert(request->removePDR[i].pDRID.presence == 1, ,
-                        "[PFCP] PdrId in removePDR not presence!");
-            status = UpfN4HandleRemovePdr(session, *(uint16_t*)
-                                        request->removePDR[i].pDRID.value);
+                "SessMod: RemovePDR pdrId not presence!");
+            status = UpfN4HandleRemovePdr(session, 
+                *(uint16_t *) request->removePDR[i].pDRID.value);
             UTLT_Assert(status == STATUS_OK, return STATUS_ERROR,
-                        "Modification: Remove PDR error");
+                "SessMod: RemovePDR error ST: %d", status);
         }
     }
 
@@ -1299,88 +1440,104 @@ Status UpfN4HandleSessionModificationRequest(UpfSession *session, PfcpXact *xact
     header.type = PFCP_SESSION_MODIFICATION_RESPONSE;
     header.seid = session->smfSeid;
 
-    status = UpfN4BuildSessionModificationResponse(&bufBlk, header.type,
-                                                   session, request);
+    status = UpfN4BuildSessionModificationResponse(&bufBlk, 
+        header.type,
+        session, 
+        request);
     UTLT_Assert(status == STATUS_OK, return STATUS_ERROR,
-                "N4 build error");
+        "SessMod: Response build error ST: %d", status);
 
     status = PfcpXactUpdateTx(xact, &header, bufBlk);
-    UTLT_Assert(status == STATUS_OK, BufblkFree(bufBlk); return STATUS_ERROR,
-                "PfcpXactUpdateTx error");
+    UTLT_Assert(status == STATUS_OK, return STATUS_ERROR,
+        "SessMod: PfcpXactUpdateTx error ST: %d", status);
 
     status = PfcpXactCommit(xact);
     UTLT_Assert(status == STATUS_OK, return STATUS_ERROR,
-                "PFCP Commit error");
+        "SessMod: PFCP Xact Commit error ST: %d", status);
 
-    UTLT_Info("[PFCP] Session Modification Response");
+    UTLT_Debug("SessMod: Session Modification Request Done");
     return STATUS_OK;
 }
 
 Status UpfN4HandleSessionDeletionRequest(UpfSession *session, PfcpXact *xact,
-                                         PFCPSessionDeletionRequest *request) {
-    UTLT_Assert(session, return STATUS_ERROR, "session error");
-    UTLT_Assert(xact, return STATUS_ERROR, "xact error");
+    PFCPSessionDeletionRequest *request) {
+    
+    UTLT_Assert(session, return STATUS_ERROR, "SessDel: session NULL");
+    UTLT_Assert(xact, return STATUS_ERROR, "SessDel: xact NULL");
 
     Status status;
     PfcpHeader header;
     Bufblk *bufBlk = NULL;
 
-    /* delete session */
+    //TODO: Validate the current and given values
+ 
     UTLT_Assert(UpfSessionRemove(session) == STATUS_OK, return STATUS_ERROR,
-        "UpfSessionRemove failed");
+        "SessDel: UpfSessionRemove failed");
 
     /* Send Session Deletion Response */
     memset(&header, 0, sizeof(PfcpHeader));
-
     header.type = PFCP_SESSION_DELETION_RESPONSE;
     header.seid = session->smfSeid;
 
-    status = UpfN4BuildSessionDeletionResponse(&bufBlk, header.type,
-                                               session, request);
-    UTLT_Assert(status == STATUS_OK, return STATUS_ERROR, "N4 build error");
+    status = UpfN4BuildSessionDeletionResponse(&bufBlk,
+        header.type,
+        session, 
+        request);
+    UTLT_Assert(status == STATUS_OK, return STATUS_ERROR, 
+        "SessDel: Response build error ST: %d", status);
 
     status = PfcpXactUpdateTx(xact, &header, bufBlk);
-    UTLT_Assert(status == STATUS_OK, BufblkFree(bufBlk); return STATUS_ERROR,
-                "PfcpXactUpdateTx error");
+    UTLT_Assert(status == STATUS_OK, return STATUS_ERROR,
+        "SessDel: PfcpXactUpdateTx error ST: %d", status);
 
     status = PfcpXactCommit(xact);
-    UTLT_Assert(status == STATUS_OK, return STATUS_ERROR, "xact commit error");
+    UTLT_Assert(status == STATUS_OK, return STATUS_ERROR, 
+        "SessDel: xact commit error ST: %d", status);
 
-    UTLT_Info("[PFCP] Session Deletion Response");
+    UTLT_Debug("SessDel: Session Deletion Request done");
     return STATUS_OK;
 }
 
 Status UpfN4HandleSessionReportResponse(UpfSession *session, PfcpXact *xact,
-                                        PFCPSessionReportResponse *response) {
+    uint32_t seqId, PFCPSessionReportResponse *response) {
     Status status;
 
-    UTLT_Assert(session, return STATUS_ERROR, "Session error");
-    UTLT_Assert(xact, return STATUS_ERROR, "xact error");
+    UTLT_Assert(session, return STATUS_ERROR, "SRR: Session NULL");
+    UTLT_Assert(xact, return STATUS_ERROR, "SRR: xact NULL");
     UTLT_Assert(response->cause.presence, return STATUS_ERROR,
-                "SessionReportResponse error: no Cause");
+        "SRR: Cause not present");
 
     // TODO: check if need update TX
+    UpfSRRNode *srr = UpfSrrFindBySeqId(session, seqId);
+    if (srr != NULL) {
+        srr->state = SRR_STATE_RECV;
+        //The timer will be stopped in timer handler of SRR 
+    } else {
+        UTLT_Error("SRR: Can't find SRR Node by SeqId(%#x)", seqId);
+    }
 
     status = PfcpXactCommit(xact);
     UTLT_Assert(status == STATUS_OK, return STATUS_ERROR,
-                "xact commit error");
+                "SRR: xact commit error ST: %d", status);
 
-    UTLT_Info("[PFCP] Session Report Response");
+    UTLT_Debug("SRR: Session Report Request done");
     return STATUS_OK;
 }
 
 Status UpfN4HandleAssociationSetupRequest(PfcpXact *xact,
-                                          PFCPAssociationSetupRequest *request) {
+    PFCPAssociationSetupRequest *request) {
     PfcpNodeId *nodeId;
 
-    UTLT_Assert(xact, return STATUS_ERROR, "xact error");
-    UTLT_Assert(xact->gnode, return STATUS_ERROR,
-                "gNode of xact error");
+    UTLT_Assert(xact, return STATUS_ERROR, "AssSetupReq: xact NULL");
+    UTLT_Assert(xact->gnode, return STATUS_ERROR, "AssSetupReq: gNode NULL");
     UTLT_Assert(request->nodeID.presence, return STATUS_ERROR,
-                "Request missing nodeId");
+        "AssSetupReq: NodeId is not present");
 
-    nodeId = (PfcpNodeId *)request->nodeID.value;
+    nodeId = (PfcpNodeId *) request->nodeID.value;
 
+    /* gnode object allocated or referenced in function 
+     * _pfcpReceiveCB
+     * */
     xact->gnode->nodeId.type = nodeId->type;
     switch (nodeId->type) {
     case PFCP_NODE_ID_IPV4:
@@ -1389,68 +1546,68 @@ Status UpfN4HandleAssociationSetupRequest(PfcpXact *xact,
     case PFCP_NODE_ID_IPV6:
         xact->gnode->nodeId.addr6 = nodeId->addr6;
         break;
+    case PFCP_NODE_ID_FQDN :
+        memcpy(xact->gnode->nodeId.fqdn, nodeId->fqdn, sizeof(nodeId->fqdn));
+        break;
     default:
-        UTLT_Assert(0, return STATUS_ERROR,
-                    "Request no node id type");
+        UTLT_Assert(0, return STATUS_ERROR, "AssSetupReq: Request don't have node id type");
         break;
     }
 
-    /* Accept */
     xact->gnode->state = PFCP_NODE_ST_ASSOCIATED;
 
     Status status;
     PfcpHeader header;
     Bufblk *bufBlk = NULL;
 
-    /* Send */
     memset(&header, 0, sizeof(PfcpHeader));
     header.type = PFCP_ASSOCIATION_SETUP_RESPONSE;
     header.seid = 0;
-
     status = UpfN4BuildAssociationSetupResponse(&bufBlk, header.type);
     UTLT_Assert(status == STATUS_OK, return STATUS_ERROR,
-                "N4 build error");
+        "AssSetupReq: N4 build error ST: %d", status);
 
     status = PfcpXactUpdateTx(xact, &header, bufBlk);
-    UTLT_Assert(status == STATUS_OK, BufblkFree(bufBlk); return STATUS_ERROR,
-                "PfcpXactUpdateTx error");
+    UTLT_Assert(status == STATUS_OK, return STATUS_ERROR,
+        "AssSetupReq: Xact Update Tx error ST: %d", status);
 
     status = PfcpXactCommit(xact);
     UTLT_Assert(status == STATUS_OK, return STATUS_ERROR,
-                "xact commit error");
+        "AssSetupReq: xact commit error ST: %d", status);
 
-    UTLT_Info("[PFCP] Association Setup Response");
+    UTLT_Debug("AssSetupReq: Association Setup Request done");
     return STATUS_OK;
 }
 
 Status UpfN4HandleAssociationUpdateRequest(PfcpXact *xact,
-                                           PFCPAssociationUpdateRequest *request) {
+    PFCPAssociationUpdateRequest *request) {
     // TODO
-    UTLT_Info("[PFCP] TODO Association Update Request");
+    UTLT_Error("AssUpReq: TODO Association Update Request");
     return STATUS_OK;
 }
 
 Status UpfN4HandleAssociationReleaseRequest(PfcpXact *xact,
-                                            PFCPAssociationReleaseRequest *request) {
-    UTLT_Assert(xact, return STATUS_ERROR, "xact error");
+    PFCPAssociationReleaseRequest *request) {
+    UTLT_Assert(xact, return STATUS_ERROR, "AssRel: xact NULL");
     UTLT_Assert(xact->gnode, return STATUS_ERROR,
-                "gNode of xact error");
+        "AssRel: gNode of xact NULL");
     UTLT_Assert(request->nodeID.presence, return STATUS_ERROR,
-                "Request missing nodeId");
+        "AssRel: missing nodeId");
 
     // Clear all session releated to this node
     HashIndex *sessionHashIdx = NULL;
     UpfSession *session = NULL;
-
     for (sessionHashIdx = UpfSessionFirst(); sessionHashIdx;
-         sessionHashIdx = UpfSessionNext(sessionHashIdx)) {
+        sessionHashIdx = UpfSessionNext(sessionHashIdx)) {
         session = UpfSessionThis(sessionHashIdx);
         // Clear transaction node
         if (session->pfcpNode == xact->gnode) {
             UpfSessionRemove(session);
         }
     }
-    // TODO: Check if I need to remove gnode in transaction
+
+    // TODO: Delete the Node (which was created by _pfcpReceiveCB) and release outstanding xactin except the
+    // current one
 
     // Build Response
     Status status;
@@ -1463,17 +1620,17 @@ Status UpfN4HandleAssociationReleaseRequest(PfcpXact *xact,
 
     status = UpfN4BuildAssociationReleaseResponse(&bufBlk, header.type);
     UTLT_Assert(status == STATUS_OK, return STATUS_ERROR,
-                "N4 build error");
+        "AssRel: Response build error ST: %d", status);
 
     status = PfcpXactUpdateTx(xact, &header, bufBlk);
-    UTLT_Assert(status == STATUS_OK, BufblkFree(bufBlk); return STATUS_ERROR,
-                "PfcpXactUpdateTx error");
+    UTLT_Assert(status == STATUS_OK, return STATUS_ERROR,
+        "AssRel: PfcpXactUpdateTx error ST: %d", status);
 
     status = PfcpXactCommit(xact);
     UTLT_Assert(status == STATUS_OK, return STATUS_ERROR,
-                "xact commit error");
+        "AssRel: xact commit error ST: %d", status);
 
-    UTLT_Info("[PFCP] Association Release Request");
+    UTLT_Info("AssRel: Association Release Request done");
     return STATUS_OK;
 }
 
@@ -1482,7 +1639,7 @@ Status UpfN4HandleHeartbeatRequest(PfcpXact *xact, HeartbeatRequest *request) {
     PfcpHeader header;
     Bufblk *bufBlk = NULL;
 
-    UTLT_Info("[PFCP] Heartbeat Request");
+    UTLT_Assert(xact, return STATUS_ERROR, "HeartReq: xact NULL");
 
     /* Send */
     memset(&header, 0, sizeof(PfcpHeader));
@@ -1491,23 +1648,23 @@ Status UpfN4HandleHeartbeatRequest(PfcpXact *xact, HeartbeatRequest *request) {
 
     status = UpfN4BuildHeartbeatResponse(&bufBlk, header.type);
     UTLT_Assert(status == STATUS_OK, return STATUS_ERROR,
-                "N4 build error");
+        "HeartReq: Response build error ST: %d", status);
 
     status = PfcpXactUpdateTx(xact, &header, bufBlk);
-    UTLT_Assert(status == STATUS_OK, BufblkFree(bufBlk); return STATUS_ERROR,
-                "PfcpXactUpdateTx error");
+    UTLT_Assert(status == STATUS_OK, return STATUS_ERROR,
+        "HeartReq: PfcpXactUpdateTx error ST: %d", status);
 
     status = PfcpXactCommit(xact);
     UTLT_Assert(status == STATUS_OK, return STATUS_ERROR,
-                "xact commit error");
+        "HeartReq: xact commit error ST: %d", status);
 
-    UTLT_Info("[PFCP] Heartbeat Response");
+    UTLT_Info("HeartReq: Heartbeat Request done");
     return STATUS_OK;
 }
 
 Status UpfN4HandleHeartbeatResponse(PfcpXact *xact,
                                     HeartbeatResponse *response) {
     // if rsv response, nothing to do, else peer may be not alive
-    UTLT_Info("[PFCP] Heartbeat Response");
+    UTLT_Error("HeartRsp: TODO ");
     return STATUS_OK;
 }

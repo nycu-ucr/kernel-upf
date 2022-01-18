@@ -6,8 +6,12 @@ link_directories("${LIBGTP5GNL_DST}/lib" ${LOGGER_DST})
 
 # Build destination
 set(LIBGTP5GNL_SRC "${CMAKE_SOURCE_DIR}/updk/src/third_party/libgtp5gnl")
+
 set(LIBGTP5GNL_DST "${CMAKE_BINARY_DIR}/updk/src/third_party/libgtp5gnl")
 set(LIBGTP5GNL_DST_SO "${LIBGTP5GNL_DST}/lib/libgtp5gnl.so")
+
+
+
 
 # Sources
 file(GLOB_RECURSE SELF_FILES "*.c")

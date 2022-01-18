@@ -12,7 +12,7 @@
 extern "C" {
 #endif /* __cplusplus */
 
-#define MAX_NUM_OF_TIMER        1024
+#define MAX_NUM_OF_TIMER        2048
 
 // paramID for setting timer parameter
 #define PARAM1   0
@@ -40,7 +40,7 @@ Status TimerFinal();
 uint32_t TimerGetPoolSize();
 
 void TimerListInit(TimerList *tmList);
-Status TimerExpireCheck(TimerList *tmList, uintptr_t data);
+Status TimerExpireCheck(TimerList *tmList, uintptr_t data, int32_t diff);
 
 Status TimerStart(TimerBlkID id);
 Status TimerStop(TimerBlkID id);

@@ -25,12 +25,12 @@ extern "C" {
 #define SCTP_NGAP_PPID              60
 
 #define MAX_NUM_OF_RAN              128
-#define MAX_NUM_OF_5G_UE            128
+#define MAX_NUM_OF_5G_UE            256
 
 #define MAX_POOL_OF_5G_UE           (MAX_NUM_OF_RAN * MAX_NUM_OF_5G_UE)
 
 #define MAX_NUM_OF_ENB              128
-#define MAX_NUM_OF_UE               128
+#define MAX_NUM_OF_UE               256
 #define MAX_NUM_OF_SESS             4
 #define MAX_NUM_OF_BEARER           4
 #define MAX_NUM_OF_TUNNEL           3   /* Num of Tunnel per Bearer */

@@ -1,0 +1,64 @@
+kind: pipeline
+name: development
+
+steps:
+  - name: Unit test and build
+    image:  drone/ubuntu-golang
+    pull: never
+    depends_on: [ clone ]
+    commands:
+      - apt-get update && apt -y install git gcc g++ cmake autoconf libtool pkg-config libmnl-dev libyaml-dev net-tools  libcurl4-openssl-dev
+      - mkdir -p build
+      - cd build
+      - cmake ..
+      - make
+
+  - name: docker_build
+    image: plugins/docker
+    privileged: true
+    depends_on:
+      - "Unit test and build"
+    settings:
+      repo: 10.10.0.50:5000/bitbucket/free5gc/free5gc-upf
+      registry: 10.10.0.50:5000
+      username:
+        from_secret: docker_username
+      password:
+        from_secret: docker_passwd
+      build_args:
+        - DEBUG_TOOLS=true
+    volumes:
+      - name: cert_path
+        path: /etc/docker/certs.d/
+    when:
+      branch:
+      - develop
+
+  - name: release
+    image: plugins/docker
+    depends_on:
+      - "Unit test and build"
+    privileged: true
+    settings:
+      force_tag: false
+      repo: 10.10.0.50:5000/bitbucket/free5gc/free5gc-upf
+      registry: 10.10.0.50:5000
+      username:
+        from_secret: docker_username
+      password:
+        from_secret: docker_passwd
+      tags:
+        - ${DRONE_TAG}
+    volumes:
+      - name: cert_path
+        path: /etc/docker/certs.d/
+    when:
+      event:
+        - tag
+
+volumes:
+  - name: cert_path
+    host:
+      path: /etc/docker/certs.d/
+
+
