@@ -168,8 +168,9 @@ Status UpfN4BuildSessionReportRequestDownlinkDataReport(Bufblk **bufBlkPtr,
     pfcpMessage.header.type = type;
     status = PfcpBuildMessage(bufBlkPtr, &pfcpMessage);
     UTLT_Assert(status == STATUS_OK, return STATUS_ERROR, "SRRBuild: Failed to build response");
-
-    UTLT_Debug("SRRBuild: Success to build response");
+    struct timeval  tv;
+    gettimeofday(&tv, NULL);
+    UTLT_Info("SRRBuild: Success to build response: %f (sec)", (float)(tv.tv_usec)/1000000);
     return STATUS_OK;
 }
 

@@ -1519,8 +1519,9 @@ Status UpfN4HandleSessionReportResponse(UpfSession *session, PfcpXact *xact,
     status = PfcpXactCommit(xact);
     UTLT_Assert(status == STATUS_OK, return STATUS_ERROR,
                 "SRR: xact commit error ST: %d", status);
-
-    UTLT_Debug("SRR: Session Report Request done");
+    struct timeval  tv;
+    gettimeofday(&tv, NULL);
+    UTLT_Info("SRR: Session Report Request done: %f (sec)", (float)(tv.tv_usec)/1000000);
     return STATUS_OK;
 }
 
